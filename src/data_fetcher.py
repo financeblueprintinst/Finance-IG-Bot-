@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Iterable
@@ -10,9 +11,29 @@ import feedparser
 import pandas as pd
 import yfinance as yf
 
+try:
+    from curl_cffi import requests as curl_requests
+    _HAS_CURL_CFFI = True
+except ImportError:
+    _HAS_CURL_CFFI = False
+
 from config import COMMODITIES, FOREX, INDICES, LARGE_CAPS, NEWS_FEEDS
 
 log = logging.getLogger(__name__)
+
+
+def _make_session():
+    """Create a curl_cffi session with Chrome impersonation to bypass Yahoo's
+    anti-bot rate limits on shared IPs like GitHub Actions runners."""
+    if _HAS_CURL_CFFI:
+        try:
+            return curl_requests.Session(impersonate="chrome")
+        except Exception as e:
+            log.warning("curl_cffi session init failed: %s", e)
+    return None
+
+
+_SESSION = _make_session()
 
 
 @dataclass
@@ -31,43 +52,99 @@ def _latest_two_closes(hist: pd.DataFrame) -> tuple[float, float] | None:
     return float(closes.iloc[-2]), float(closes.iloc[-1])
 
 
-def fetch_quotes(tickers: dict[str, str], period: str = "5d", interval: str = "1d") -> list[Quote]:
-    """Batch-download quotes. Returns latest price + % change vs. previous close."""
-    symbols = list(tickers.keys())
+def _download_with_retry(tickers_str: str, period: str, interval: str,
+                          retries: int = 3) -> pd.DataFrame | None:
+    """yf.download with exponential backoff on rate-limit / network errors."""
+    delay = 2.0
+    for attempt in range(retries):
+        try:
+            kwargs = dict(
+                tickers=tickers_str,
+                period=period,
+                interval=interval,
+                group_by="ticker",
+                auto_adjust=True,
+                threads=False,  # serial — gentler on rate limits
+                progress=False,
+            )
+            if _SESSION is not None:
+                kwargs["session"] = _SESSION
+            data = yf.download(**kwargs)
+            if data is not None and not data.empty:
+                return data
+            log.warning("yfinance returned empty data (attempt %d)", attempt + 1)
+        except Exception as e:
+            log.warning("yfinance download attempt %d failed: %s", attempt + 1, e)
+        if attempt < retries - 1:
+            log.info("Backing off %.1fs before retry", delay)
+            time.sleep(delay)
+            delay *= 2.5
+    return None
+
+
+def _fetch_ticker_history(symbol: str, period: str, interval: str) -> pd.DataFrame | None:
+    """Per-ticker fallback via yf.Ticker when batch download fails."""
     try:
-        data = yf.download(
-            tickers=" ".join(symbols),
-            period=period,
-            interval=interval,
-            group_by="ticker",
-            auto_adjust=True,
-            threads=True,
-            progress=False,
-        )
+        ticker = yf.Ticker(symbol, session=_SESSION) if _SESSION is not None else yf.Ticker(symbol)
+        hist = ticker.history(period=period, interval=interval, auto_adjust=True)
+        if hist is not None and not hist.empty:
+            return hist
     except Exception as e:
-        log.error("yfinance batch download failed: %s", e)
-        return []
+        log.warning("Ticker %s fetch failed: %s", symbol, e)
+    return None
+
+
+def fetch_quotes(tickers: dict[str, str], period: str = "5d", interval: str = "1d") -> list[Quote]:
+    """Batch-download with retry. Falls back to per-ticker on failure."""
+    symbols = list(tickers.keys())
+    data = _download_with_retry(" ".join(symbols), period, interval)
 
     quotes: list[Quote] = []
-    for sym in symbols:
-        try:
-            sub = data[sym] if len(symbols) > 1 else data
-            pair = _latest_two_closes(sub)
-            if not pair:
-                continue
-            prev, last = pair
-            pct = ((last - prev) / prev) * 100 if prev else 0.0
-            quotes.append(
-                Quote(
-                    ticker=sym,
-                    name=tickers[sym],
-                    price=last,
-                    change_pct=pct,
-                    history=sub["Close"].dropna(),
+
+    if data is not None and not data.empty:
+        for sym in symbols:
+            try:
+                sub = data[sym] if len(symbols) > 1 else data
+                pair = _latest_two_closes(sub)
+                if not pair:
+                    continue
+                prev, last = pair
+                pct = ((last - prev) / prev) * 100 if prev else 0.0
+                quotes.append(
+                    Quote(
+                        ticker=sym,
+                        name=tickers[sym],
+                        price=last,
+                        change_pct=pct,
+                        history=sub["Close"].dropna(),
+                    )
                 )
+            except Exception as e:
+                log.warning("Skip %s: %s", sym, e)
+        if quotes:
+            return quotes
+
+    # Fallback: per-ticker, spaced out so we don't get burst-limited
+    log.info("Batch fetch produced no quotes, falling back to per-ticker")
+    for sym in symbols:
+        hist = _fetch_ticker_history(sym, period, interval)
+        if hist is None:
+            continue
+        pair = _latest_two_closes(hist)
+        if not pair:
+            continue
+        prev, last = pair
+        pct = ((last - prev) / prev) * 100 if prev else 0.0
+        quotes.append(
+            Quote(
+                ticker=sym,
+                name=tickers[sym],
+                price=last,
+                change_pct=pct,
+                history=hist["Close"].dropna(),
             )
-        except Exception as e:
-            log.warning("Skip %s: %s", sym, e)
+        )
+        time.sleep(0.4)  # gentle pacing between per-ticker calls
     return quotes
 
 
