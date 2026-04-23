@@ -1,307 +1,324 @@
-"""Content library for Reels: curated investor quotes + topical Gemini content.
+"""Content selection + structured Gemini generation for premium reels.
 
-Categories rotate deterministically based on the current date. A given date
-always produces the same category + topic pick, which makes the render and
-publish phases of the workflow reproducible (important because the workflow
-runs Python twice — once to render, once to publish).
+The old version produced a single plain-text quote. This version produces a
+fully-structured ContentItem that matches the 5-scene HTML reel template:
 
-For AI-generated content (non-quote categories), Gemini is called with a
-temperature > 0 so output varies, but we persist the rendered output + caption
-to a JSON file so the publish phase uses the exact same text.
+  Scene 1  Hook        — editorial opening headline (serif)
+  Scene 2  Beat 1      — concrete fact/number (setup)
+  Scene 3  Beat 2      — payoff / twist / consequence
+  Scene 4  Takeaway    — one-line lesson (serif)
+  Scene 5  Outro       — brand lockup (rendered by template, not generated)
+
+Output is a JSON object from Gemini that maps 1:1 to template placeholders.
+Falls back to hand-curated structured content if Gemini is unavailable.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
+import random
+import re
 from dataclasses import dataclass
 from datetime import date
 
 log = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Data model
+# ---------------------------------------------------------------------------
 @dataclass
 class ContentItem:
-    text: str             # The quote / insight itself (spoken + displayed)
-    author: str           # Attributed author, or "" for AI-generated
-    category: str         # slug
-    category_label: str   # Human display label on the reel
+    category: str           # internal key, e.g. "investor_quotes"
+    category_label: str     # label shown in header, e.g. "Wisdom"
+    source_text: str        # the original quote or topic seed
+    author: str | None      # for investor_quotes; otherwise None
+
+    # Structured content mapped to the HTML template:
+    hook_kicker: str
+    hook_html: str
+    beats: list[dict]       # exactly 2 entries with {"kicker", "text_html"}
+    takeaway_html: str
+    image_keywords: str     # space-separated keywords for Pexels search
 
 
 # ---------------------------------------------------------------------------
-# Curated investor quotes — real, attributed, short excerpts (fair use).
+# Seed material: investor quotes + topical prompts
 # ---------------------------------------------------------------------------
 INVESTOR_QUOTES: list[tuple[str, str]] = [
-    ("The stock market is designed to transfer money from the active to the patient.", "Warren Buffett"),
-    ("Price is what you pay. Value is what you get.", "Warren Buffett"),
     ("Be fearful when others are greedy, and greedy when others are fearful.", "Warren Buffett"),
+    ("Price is what you pay. Value is what you get.", "Warren Buffett"),
+    ("The stock market is a device for transferring money from the impatient to the patient.", "Warren Buffett"),
     ("Risk comes from not knowing what you're doing.", "Warren Buffett"),
-    ("The most important quality for an investor is temperament, not intellect.", "Warren Buffett"),
     ("Our favorite holding period is forever.", "Warren Buffett"),
-    ("It's far better to buy a wonderful company at a fair price than a fair company at a wonderful price.", "Warren Buffett"),
-    ("The best chance to deploy capital is when things are going down.", "Warren Buffett"),
-    ("Someone's sitting in the shade today because someone planted a tree a long time ago.", "Warren Buffett"),
-    ("Opportunities come infrequently. When it rains gold, put out the bucket, not the thimble.", "Warren Buffett"),
-    ("The big money is not in the buying or selling, but in the waiting.", "Charlie Munger"),
+    ("It is far better to buy a wonderful company at a fair price than a fair company at a wonderful price.", "Warren Buffett"),
+    ("The big money is not in the buying and selling, but in the waiting.", "Charlie Munger"),
     ("Invert, always invert.", "Charlie Munger"),
-    ("Take a simple idea and take it seriously.", "Charlie Munger"),
-    ("Knowing what you don't know is more useful than being brilliant.", "Charlie Munger"),
-    ("Spend each day trying to be a little wiser than you were when you woke up.", "Charlie Munger"),
-    ("A lot of success in life and business comes from knowing what you want to avoid.", "Charlie Munger"),
+    ("It's not supposed to be easy. Anyone who finds it easy is stupid.", "Charlie Munger"),
+    ("Show me the incentive, and I'll show you the outcome.", "Charlie Munger"),
     ("Don't look for the needle in the haystack. Just buy the haystack.", "John Bogle"),
-    ("Time is your friend. Impulse is your enemy.", "John Bogle"),
-    ("The two greatest enemies of the equity fund investor are expenses and emotions.", "John Bogle"),
-    ("Stay the course. No matter what happens, stick to your program.", "John Bogle"),
-    ("The investor's chief problem, and even his worst enemy, is likely to be himself.", "Benjamin Graham"),
-    ("In the short run, the market is a voting machine. In the long run, it is a weighing machine.", "Benjamin Graham"),
-    ("The intelligent investor is a realist who sells to optimists and buys from pessimists.", "Benjamin Graham"),
-    ("Successful investing is about managing risk, not avoiding it.", "Benjamin Graham"),
+    ("Time is your friend; impulse is your enemy.", "John Bogle"),
+    ("The investor's chief problem — and even his worst enemy — is likely to be himself.", "Benjamin Graham"),
+    ("In the short run, the market is a voting machine; in the long run, it is a weighing machine.", "Benjamin Graham"),
+    ("The four most dangerous words in investing are 'this time it's different.'", "John Templeton"),
+    ("Far more money has been lost by investors preparing for corrections than has been lost in the corrections themselves.", "Peter Lynch"),
     ("Know what you own, and know why you own it.", "Peter Lynch"),
-    ("The best stock to buy may be the one you already own.", "Peter Lynch"),
-    ("The four most dangerous words in investing are: this time it's different.", "Sir John Templeton"),
-    ("Bull markets are born on pessimism, grown on skepticism, mature on optimism, and die on euphoria.", "Sir John Templeton"),
-    ("The time of maximum pessimism is the best time to buy.", "Sir John Templeton"),
-    ("The stock market is filled with individuals who know the price of everything, but the value of nothing.", "Philip Fisher"),
-    ("If the job has been correctly done when a common stock is purchased, the time to sell it is almost never.", "Philip Fisher"),
+    ("The market can remain irrational longer than you can remain solvent.", "John Maynard Keynes"),
     ("An investment in knowledge pays the best interest.", "Benjamin Franklin"),
-    ("The market can stay irrational longer than you can stay solvent.", "John Maynard Keynes"),
+    ("Compound interest is the eighth wonder of the world.", "Albert Einstein"),
+    ("The best time to plant a tree was 20 years ago. The second best time is now.", "Chinese Proverb"),
 ]
 
-
-# ---------------------------------------------------------------------------
-# Topic lists for Gemini-generated categories
-# ---------------------------------------------------------------------------
-SUCCESS_MINDSET_TOPICS = [
-    "the power of delayed gratification in wealth building",
-    "why compound interest rewards patience over genius",
-    "discipline outperforming motivation over a decade",
-    "how boredom builds empires while excitement destroys them",
-    "why showing up daily beats rare heroic effort",
-    "the mindset shift from consumer to owner",
-    "why small consistent wins compound into fortune",
+MINDSET_TOPICS: list[str] = [
+    "why most people lose money trying to time the market",
+    "the psychology of missing a bull run and what happens next",
+    "how compound interest becomes unstoppable after year 20",
+    "why luck looks like skill in short time frames",
+    "the silent cost of lifestyle inflation",
+    "why boredom is the real superpower of long-term investors",
+    "how the fear of missing out creates losses at the top of every cycle",
+    "why your first 100k is the hardest and everything after accelerates",
     "the difference between being rich and being wealthy",
-    "why your first hundred thousand euros is the hardest",
-    "long-term thinking as the ultimate competitive edge",
-    "why solitude and focus matter more than networking",
-    "the freedom of needing less instead of earning more",
+    "why news is the enemy of returns",
 ]
 
-FINANCIAL_HABITS_TOPICS = [
-    "paying yourself first before any other expense",
-    "tracking every euro spent for thirty days",
-    "automating investments on payday",
-    "reading one financial book per month",
-    "reviewing your portfolio quarterly, not daily",
-    "setting a specific savings goal with a deadline",
-    "calculating your net worth every month",
-    "maximizing an employer pension or retirement match first",
-    "building a three to six month emergency fund",
-    "cutting one recurring subscription every quarter",
-    "never financing a depreciating asset",
-    "asking 'is this worth my hours of work' before every purchase",
+HABITS_TOPICS: list[str] = [
+    "why automating savings beats willpower every time",
+    "the real cost of checking your portfolio daily",
+    "tax-advantaged accounts most people underuse",
+    "why a boring index fund beats 90% of active managers over 20 years",
+    "how paying yourself first rewires your spending",
+    "the envelope method, reborn for the digital age",
+    "why low-cost beats everything else in fund selection",
+    "how dollar-cost averaging removes emotion from investing",
+    "why an emergency fund is the highest-ROI 'asset' you'll ever hold",
+    "the 72 rule: how long until your money doubles",
 ]
 
-MONEY_PSYCHOLOGY_TOPICS = [
-    "loss aversion and why we sell winners too early",
-    "anchoring bias distorting our sense of fair price",
-    "recency bias in market predictions",
-    "overconfidence bias in trading decisions",
-    "herd mentality at market tops",
-    "confirmation bias when researching stocks",
-    "sunk cost fallacy in losing positions",
-    "the illusion of control in active trading",
-    "mental accounting and why a euro is a euro",
-    "availability bias from financial news",
-    "the endowment effect inflating what we already own",
-    "narrative fallacy and seductive market stories",
+PSYCHOLOGY_TOPICS: list[str] = [
+    "loss aversion: why a loss hurts twice as much as a gain feels good",
+    "recency bias: why investors over-weight the last 3 months",
+    "anchoring: why we're stuck on the price we bought at",
+    "confirmation bias: why you only hear news that agrees with your position",
+    "survivor bias: why reading founder success stories misleads you",
+    "the dunning-kruger trap in investing",
+    "herd behavior: why crowds are usually wrong at the top and bottom",
+    "sunk-cost fallacy: why 'waiting to break even' destroys portfolios",
+    "overconfidence after a single good year",
+    "the pain of watching friends get rich in a bubble",
 ]
 
-HOPE_MOTIVATION_TOPICS = [
-    "starting from zero as a strength, not a weakness",
-    "why your financial future is closer than you think",
-    "the freedom that comes from consistent saving",
-    "how ten years of discipline changes everything",
-    "why it is never too late to start investing",
-    "the quiet confidence of being debt free",
-    "rebuilding after a financial setback",
-    "the power of a fully funded emergency fund",
-    "small monthly investments becoming life-changing wealth",
-    "why frugality is a superpower, not a sacrifice",
-    "the calm of having options in your career",
-    "what financial independence actually feels like",
+MOTIVATION_TOPICS: list[str] = [
+    "starting late is not a death sentence — what you can still do at 40",
+    "why the person you become matters more than the returns you earn",
+    "consistency over intensity: the real formula for wealth",
+    "why discipline is a form of self-respect",
+    "how a single decision to save $200/month changes everything at 65",
+    "the quiet confidence of someone who lives below their means",
+    "why patience is the rarest and most profitable skill",
+    "building wealth is not about deprivation — it's about alignment",
+    "why your biggest financial enemy is your future self's regret",
+    "compound interest applies to skills, not just capital",
+]
+
+
+# Category rotation: investor quotes every other slot, topics interleaved.
+CATEGORIES: dict[str, tuple[str, list]] = {
+    "investor_quotes": ("Wisdom", INVESTOR_QUOTES),
+    "mindset":         ("Mindset", MINDSET_TOPICS),
+    "habits":          ("Habits", HABITS_TOPICS),
+    "psychology":      ("Psychology", PSYCHOLOGY_TOPICS),
+    "motivation":      ("Motivation", MOTIVATION_TOPICS),
+}
+
+ROTATION = [
+    "investor_quotes",
+    "mindset",
+    "investor_quotes",
+    "habits",
+    "investor_quotes",
+    "psychology",
+    "investor_quotes",
+    "motivation",
 ]
 
 
 # ---------------------------------------------------------------------------
-# Category rotation — indexed by date ordinal
+# Deterministic daily picker
 # ---------------------------------------------------------------------------
-CATEGORY_ROTATION = [
-    "investor_quotes",
-    "success_mindset",
-    "investor_quotes",
-    "financial_habits",
-    "investor_quotes",
-    "money_psychology",
-    "investor_quotes",
-    "hope_motivation",
-]
+def _rng_for(today: date) -> random.Random:
+    return random.Random(today.toordinal())
 
-CATEGORY_LABELS = {
-    "investor_quotes": "INVESTOR WISDOM",
-    "success_mindset": "SUCCESS MINDSET",
-    "financial_habits": "FINANCIAL HABIT",
-    "money_psychology": "MONEY PSYCHOLOGY",
-    "hope_motivation": "MINDSET FUEL",
-}
 
-TOPIC_LISTS = {
-    "success_mindset": SUCCESS_MINDSET_TOPICS,
-    "financial_habits": FINANCIAL_HABITS_TOPICS,
-    "money_psychology": MONEY_PSYCHOLOGY_TOPICS,
-    "hope_motivation": HOPE_MOTIVATION_TOPICS,
-}
+def pick_content(today: date) -> ContentItem:
+    rng = _rng_for(today)
+    category = ROTATION[today.toordinal() % len(ROTATION)]
+    category_label, pool = CATEGORIES[category]
+
+    if category == "investor_quotes":
+        quote, author = rng.choice(pool)
+        source_text = quote
+    else:
+        source_text = rng.choice(pool)
+        author = None
+
+    log.info("Picked category=%s source=%r author=%s", category, source_text, author)
+
+    structured = _generate_structured(source_text, author, category_label)
+
+    return ContentItem(
+        category=category,
+        category_label=category_label,
+        source_text=source_text,
+        author=author,
+        hook_kicker=structured["hook_kicker"],
+        hook_html=structured["hook_html"],
+        beats=structured["beats"],
+        takeaway_html=structured["takeaway_html"],
+        image_keywords=structured["image_keywords"],
+    )
 
 
 # ---------------------------------------------------------------------------
-# Gemini prompts per category
+# Gemini structured generation
 # ---------------------------------------------------------------------------
-_PROMPTS = {
-    "success_mindset": (
-        "Write a punchy, thought-provoking 2-3 sentence insight on: {topic}. "
-        "Tone: confident, warm, slightly philosophical. Audience: retail "
-        "investors and self-improvers. No hashtags, no emojis, no attribution. "
-        "Output only the insight itself."
-    ),
-    "financial_habits": (
-        "Write a concrete, actionable 2-3 sentence piece of financial advice "
-        "on: {topic}. Tone: direct, practical, no fluff. Audience: everyday "
-        "savers building wealth. No hashtags, no emojis. Output only the advice."
-    ),
-    "money_psychology": (
-        "Write a 2-3 sentence insight about the behavioral finance concept: "
-        "{topic}. Tone: sharp, slightly contrarian, educational. Audience: "
-        "investors who want to understand their own mistakes. No jargon beyond "
-        "the concept name, no hashtags, no emojis. Output only the insight."
-    ),
-    "hope_motivation": (
-        "Write 2-3 sentences of grounded, non-cheesy motivation on: {topic}. "
-        "Tone: quietly confident, realistic, encouraging without hype. Audience: "
-        "people building long-term financial stability. No hashtags, no emojis, "
-        "no motivational cliches. Output only the message itself."
-    ),
-}
+GEMINI_PROMPT = """You are a senior content editor for a premium Instagram finance account.
+You are writing a 5-scene Reel in the voice of Financial Times / Monocle — editorial, \
+serious, grounded. NOT hype. NOT get-rich-quick. NOT emoji-laden.
+
+Category: {category_label}
+Source material: {source}
+
+Return ONLY a JSON object (no markdown fences, no explanation) with this EXACT schema:
+
+{{
+  "hook_kicker": "Short uppercase-ready kicker label. Max 25 chars. Examples: 'THE BUFFETT PRINCIPLE', 'COMPOUND RULE', 'MARKET PSYCHOLOGY'.",
+  "hook_html": "Editorial opening headline. Max 70 chars. Wrap 1-2 words in <em>...</em> for emphasis. No trailing period. Example: 'Why <em>Warren Buffett</em> buys when others sell'.",
+  "beats": [
+    {{
+      "kicker": "Scene-2 kicker, max 25 chars. Often a year or setting. Example: '2008 - FINANCIAL CRISIS'.",
+      "text_html": "One concrete sentence with a fact/number/historical event. Wrap big numbers in <span class='big'>$5B</span> (max one per beat). Wrap 1-2 key words in <span class='highlight'>word</span>. Max 120 chars total."
+    }},
+    {{
+      "kicker": "Scene-3 kicker: the payoff label. Max 25 chars. Example: '5 YEARS LATER'.",
+      "text_html": "The consequence, twist, or result that follows beat 1. Makes the lesson land. Max 120 chars. Use <span class='highlight'> sparingly."
+    }}
+  ],
+  "takeaway_html": "One-line lesson. Max 80 chars. Wrap 2-3 meaningful words in <em>...</em>. No emojis. Example: 'Fear creates <em>bargains</em>. Discipline turns them into <em>wealth</em>.'",
+  "image_keywords": "3-4 keywords for atmospheric stock photos, space-separated. Prefer moody/urban/trading imagery. Example: 'stock market trading night'"
+}}
+
+HARD RULES:
+- Every beat must contain a specific, checkable fact (year, number, named person, historical event, or named principle).
+- No fluff. Every sentence must add information.
+- No motivational-poster cliches ('follow your dreams', 'grind', etc.).
+- Allowed HTML tags: <em>, <span class='highlight'>, <span class='big'>. Nothing else.
+- Numbers in beats: use concrete values like '$5B', '$10K', '7%', '20 years'.
+- Return the JSON object ONLY.
+"""
 
 
-# Fallback when Gemini is unavailable / errors out
-FALLBACK_CONTENT = {
-    "success_mindset": (
-        "Wealth is built in the boring years — the ones where nothing exciting "
-        "happens, but you keep showing up. Most people quit before the "
-        "compounding even starts to matter."
-    ),
-    "financial_habits": (
-        "Pay yourself first. Before rent, before groceries, move a fixed amount "
-        "into investments automatically on payday. What you never see, you "
-        "never miss."
-    ),
-    "money_psychology": (
-        "Loss aversion makes us sell winners too early and hold losers too long. "
-        "The pain of a paper loss feels twice as strong as the pleasure of an "
-        "equivalent gain — and it quietly costs us a fortune."
-    ),
-    "hope_motivation": (
-        "Your first hundred thousand is the hardest. After that, compounding "
-        "does the heavy lifting. The real milestone isn't the money — it's "
-        "proving to yourself that you can stay the course."
-    ),
-}
-
-
-def pick_category(today: date) -> str:
-    idx = today.toordinal() % len(CATEGORY_ROTATION)
-    return CATEGORY_ROTATION[idx]
-
-
-def _pick_quote(today: date) -> ContentItem:
-    idx = today.toordinal() % len(INVESTOR_QUOTES)
-    text, author = INVESTOR_QUOTES[idx]
-    return ContentItem(text=text, author=author,
-                       category="investor_quotes",
-                       category_label=CATEGORY_LABELS["investor_quotes"])
-
-
-def _generate_with_gemini(category: str, topic: str) -> str | None:
-    api_key = os.getenv("GEMINI_API_KEY")
+def _generate_structured(source: str, author: str | None, category_label: str) -> dict:
+    """Call Gemini to produce the 5-scene structure. Fall back on any error."""
+    api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        return None
+        log.warning("No GEMINI_API_KEY — using fallback structured content")
+        return _fallback_structured(source, author, category_label)
+
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
+
+        source_with_author = f'"{source}" - {author}' if author else source
+        prompt = GEMINI_PROMPT.format(category_label=category_label, source=source_with_author)
+
         model = genai.GenerativeModel("gemini-2.5-flash")
         resp = model.generate_content(
-            _PROMPTS[category].format(topic=topic),
-            generation_config={"temperature": 0.8, "max_output_tokens": 200},
+            prompt,
+            generation_config={"temperature": 0.75, "max_output_tokens": 800},
         )
         text = (resp.text or "").strip()
-        # Gemini occasionally wraps output in quotes — strip once
-        text = text.strip('"').strip("'").strip()
-        return text or None
+
+        # Strip any markdown fences Gemini might add despite instructions
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+
+        data = json.loads(text)
+
+        # Shape validation
+        required = {"hook_kicker", "hook_html", "beats", "takeaway_html", "image_keywords"}
+        missing = required - data.keys()
+        if missing:
+            raise ValueError(f"Gemini output missing keys: {missing}")
+        if not isinstance(data["beats"], list) or len(data["beats"]) != 2:
+            raise ValueError("beats must be a list of exactly 2 items")
+        for b in data["beats"]:
+            if "kicker" not in b or "text_html" not in b:
+                raise ValueError("each beat needs 'kicker' and 'text_html'")
+
+        log.info("Gemini generated structured content successfully")
+        return data
+
     except Exception as e:
-        log.warning("Gemini generation failed for %s: %s", category, e)
-        return None
+        log.warning("Gemini structured generation failed (%s) - falling back", e)
+        return _fallback_structured(source, author, category_label)
 
 
-def _pick_generated(category: str, today: date) -> ContentItem:
-    topics = TOPIC_LISTS[category]
-    idx = today.toordinal() % len(topics)
-    topic = topics[idx]
-    log.info("Gemini topic for %s: %s", category, topic)
+def _fallback_structured(source: str, author: str | None, category_label: str) -> dict:
+    """Deterministic last-resort output so the pipeline never crashes."""
+    if author:
+        hook = f"<em>{author}</em>"
+        beat1_text = source[:120]
+        kicker = author.upper().split()[-1]
+        beat1_kicker = f"THE {kicker} PRINCIPLE"
+    else:
+        words = source.split()
+        mid = len(words) // 2
+        hook = " ".join(words[:mid])[:70]
+        beat1_text = source[:120]
+        beat1_kicker = "THE PRINCIPLE"
 
-    text = _generate_with_gemini(category, topic)
-    if not text:
-        text = FALLBACK_CONTENT.get(
-            category,
-            "Stay the course. Small, consistent action compounds into something extraordinary.",
-        )
-        log.info("Using fallback text for %s", category)
+    return {
+        "hook_kicker": category_label.upper(),
+        "hook_html": hook,
+        "beats": [
+            {"kicker": beat1_kicker, "text_html": beat1_text},
+            {"kicker": "WHY IT MATTERS",
+             "text_html": "Applied consistently, this principle compounds into serious wealth over decades."},
+        ],
+        "takeaway_html": "<em>Discipline</em> over hype. <em>Time</em> over timing.",
+        "image_keywords": "finance stock market charts wealth",
+    }
 
-    return ContentItem(text=text, author="",
-                       category=category,
-                       category_label=CATEGORY_LABELS[category])
 
-
-def pick_content(today: date | None = None) -> ContentItem:
-    """Pick today's reel content. Deterministic on date + (for AI cats) on Gemini."""
-    today = today or date.today()
-    category = pick_category(today)
-    log.info("Reel category for %s: %s", today.isoformat(), category)
-    if category == "investor_quotes":
-        return _pick_quote(today)
-    return _pick_generated(category, today)
+# ---------------------------------------------------------------------------
+# Caption builder (Instagram post text)
+# ---------------------------------------------------------------------------
+HASHTAGS = (
+    "#investing #wealthbuilding #financialfreedom #stockmarket #personalfinance "
+    "#moneymindset #compound #valueinvesting #financialliteracy #warrenbuffett "
+    "#stocks #wealth #passiveincome #moneytips #investmentstrategy"
+)
 
 
 def build_reel_caption(item: ContentItem) -> str:
-    """Build the Instagram caption that goes below the reel."""
-    body_map = {
-        "investor_quotes": (
-            f"Timeless wisdom from {item.author}. Save this for when markets get noisy."
-            if item.author else
-            "Timeless investing wisdom. Save this for when markets get noisy."
-        ),
-        "success_mindset": "The mindset that builds wealth isn't flashy — it's patient. Save this one.",
-        "financial_habits": "Small habit, massive compounding. Try it for thirty days.",
-        "money_psychology": "Knowing your biases is the difference between investing and gambling.",
-        "hope_motivation": "Your financial future is closer than you think. Keep going.",
-    }
-    body = body_map.get(item.category, "Daily wisdom from FinanceBlueprint.")
+    """Build the Instagram caption shown under the reel."""
+    hook_plain = _strip_html(item.hook_html)
+    takeaway_plain = _strip_html(item.takeaway_html)
 
-    tags_map = {
-        "investor_quotes": "#investing #buffett #munger #stockmarket #valueinvesting #wealth #mindset #finance",
-        "success_mindset": "#mindset #success #wealthbuilding #discipline #finance #motivation #entrepreneur",
-        "financial_habits": "#financialhabits #personalfinance #moneytips #budgeting #wealthbuilding #savings",
-        "money_psychology": "#behavioralfinance #investing #psychology #biases #mindset #money",
-        "hope_motivation": "#financialfreedom #motivation #mindset #wealth #success #money #fire",
-    }
-    tags = tags_map.get(item.category, "#finance #mindset #wealth")
+    parts = [hook_plain, "", takeaway_plain]
+    if item.author:
+        parts.append("")
+        parts.append(f"- {item.author}")
+    parts.append("")
+    parts.append("Follow @financeblueprintdaily for daily mindset & market insights.")
+    parts.append("")
+    parts.append(HASHTAGS)
+    parts.append("")
+    parts.append("Not financial advice. For informational purposes only.")
+    return "\n".join(parts)
 
-    disclaimer = "\u26A0\uFE0F Not financial advice. For educational purposes only."
-    return f"{body}\n\n{disclaimer}\n\n{tags}"
+
+def _strip_html(s: str) -> str:
+    return re.sub(r"<[^>]+>", "", s).strip()
