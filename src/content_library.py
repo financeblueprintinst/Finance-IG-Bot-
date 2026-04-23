@@ -190,37 +190,56 @@ serious, grounded. NOT hype. NOT get-rich-quick. NOT emoji-laden.
 Category: {category_label}
 Source material: {source}
 
-Return ONLY a JSON object (no markdown fences, no explanation) with this EXACT schema:
+Produce a structured 5-scene reel with these fields:
 
-{{
-  "hook_kicker": "Short uppercase-ready kicker label. Max 25 chars. Examples: 'THE BUFFETT PRINCIPLE', 'COMPOUND RULE', 'MARKET PSYCHOLOGY'.",
-  "hook_html": "Editorial opening headline. Max 70 chars. Wrap 1-2 words in <em>...</em> for emphasis. No trailing period. Example: 'Why <em>Warren Buffett</em> buys when others sell'.",
-  "beats": [
-    {{
-      "kicker": "Scene-2 kicker, max 25 chars. Often a year or setting. Example: '2008 - FINANCIAL CRISIS'.",
-      "text_html": "One concrete sentence with a fact/number/historical event. Wrap big numbers in <span class='big'>$5B</span> (max one per beat). Wrap 1-2 key words in <span class='highlight'>word</span>. Max 120 chars total."
-    }},
-    {{
-      "kicker": "Scene-3 kicker: the payoff label. Max 25 chars. Example: '5 YEARS LATER'.",
-      "text_html": "The consequence, twist, or result that follows beat 1. Makes the lesson land. Max 120 chars. Use <span class='highlight'> sparingly."
-    }}
-  ],
-  "takeaway_html": "One-line lesson. Max 80 chars. Wrap 2-3 meaningful words in <em>...</em>. No emojis. Example: 'Fear creates <em>bargains</em>. Discipline turns them into <em>wealth</em>.'",
-  "image_keywords": "3-4 keywords for atmospheric stock photos, space-separated. Prefer moody/urban/trading imagery. Example: 'stock market trading night'"
-}}
+- hook_kicker: Short uppercase-ready kicker label (max 25 chars). Examples: THE BUFFETT PRINCIPLE, COMPOUND RULE, MARKET PSYCHOLOGY.
+- hook_html: Editorial opening headline (max 70 chars). Wrap 1-2 words in <em>...</em> for emphasis. No trailing period. Example: Why <em>Warren Buffett</em> buys when others sell.
+- beats: Exactly 2 beats, each with a kicker (max 25 chars, often a year or setting) and text_html (max 120 chars, one concrete sentence with a fact/number/event). Wrap big numbers in <span class='big'>$5B</span> (max one per beat). Wrap 1-2 key words in <span class='highlight'>word</span>.
+- takeaway_html: One-line lesson (max 80 chars). Wrap 2-3 meaningful words in <em>...</em>. No emojis. Example: Fear creates <em>bargains</em>. Discipline turns them into <em>wealth</em>.
+- image_keywords: 3-4 keywords for atmospheric stock photos, space-separated. Prefer moody/urban/trading imagery. Example: stock market trading night.
 
 HARD RULES:
 - Every beat must contain a specific, checkable fact (year, number, named person, historical event, or named principle).
 - No fluff. Every sentence must add information.
-- No motivational-poster cliches ('follow your dreams', 'grind', etc.).
+- No motivational-poster cliches (follow your dreams, grind, etc.).
 - Allowed HTML tags: <em>, <span class='highlight'>, <span class='big'>. Nothing else.
-- Numbers in beats: use concrete values like '$5B', '$10K', '7%', '20 years'.
-- Return the JSON object ONLY.
+- Numbers in beats: use concrete values like $5B, $10K, 7%, 20 years.
+- Use straight ASCII quotes only. Never use curly quotes. Avoid embedded double-quotes inside strings.
 """
 
 
+# JSON schema that Gemini must conform to. Enables clean structured output
+# and bypasses brittle free-form JSON parsing (which broke on quotes before).
+GEMINI_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "hook_kicker": {"type": "string"},
+        "hook_html": {"type": "string"},
+        "beats": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "kicker": {"type": "string"},
+                    "text_html": {"type": "string"},
+                },
+                "required": ["kicker", "text_html"],
+            },
+        },
+        "takeaway_html": {"type": "string"},
+        "image_keywords": {"type": "string"},
+    },
+    "required": ["hook_kicker", "hook_html", "beats", "takeaway_html", "image_keywords"],
+}
+
+
 def _generate_structured(source: str, author: str | None, category_label: str) -> dict:
-    """Call Gemini to produce the 5-scene structure. Fall back on any error."""
+    """Call Gemini to produce the 5-scene structure. Fall back on any error.
+
+    Uses Gemini's structured-output mode (response_mime_type=application/json
+    with response_schema) to guarantee valid JSON. Retries up to 3 times on
+    transient failures before giving up and falling back.
+    """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         log.warning("No GEMINI_API_KEY — using fallback structured content")
@@ -228,41 +247,61 @@ def _generate_structured(source: str, author: str | None, category_label: str) -
 
     try:
         import google.generativeai as genai
-        genai.configure(api_key=api_key)
-
-        source_with_author = f'"{source}" - {author}' if author else source
-        prompt = GEMINI_PROMPT.format(category_label=category_label, source=source_with_author)
-
-        model = genai.GenerativeModel("gemini-2.5-flash")
-        resp = model.generate_content(
-            prompt,
-            generation_config={"temperature": 0.75, "max_output_tokens": 800},
-        )
-        text = (resp.text or "").strip()
-
-        # Strip any markdown fences Gemini might add despite instructions
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-
-        data = json.loads(text)
-
-        # Shape validation
-        required = {"hook_kicker", "hook_html", "beats", "takeaway_html", "image_keywords"}
-        missing = required - data.keys()
-        if missing:
-            raise ValueError(f"Gemini output missing keys: {missing}")
-        if not isinstance(data["beats"], list) or len(data["beats"]) != 2:
-            raise ValueError("beats must be a list of exactly 2 items")
-        for b in data["beats"]:
-            if "kicker" not in b or "text_html" not in b:
-                raise ValueError("each beat needs 'kicker' and 'text_html'")
-
-        log.info("Gemini generated structured content successfully")
-        return data
-
     except Exception as e:
-        log.warning("Gemini structured generation failed (%s) - falling back", e)
+        log.warning("google-generativeai import failed (%s) - falling back", e)
         return _fallback_structured(source, author, category_label)
+
+    genai.configure(api_key=api_key)
+    source_with_author = f"{source} - {author}" if author else source
+    prompt = GEMINI_PROMPT.format(category_label=category_label, source=source_with_author)
+
+    generation_config = {
+        "temperature": 0.75,
+        "max_output_tokens": 1200,
+        "response_mime_type": "application/json",
+        "response_schema": GEMINI_SCHEMA,
+    }
+
+    last_err: Exception | None = None
+    last_text: str = ""
+    # Try multiple models in case one is unavailable in the current project.
+    for model_name in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"):
+        for attempt in range(1, 3):  # 2 attempts per model
+            try:
+                model = genai.GenerativeModel(model_name)
+                resp = model.generate_content(prompt, generation_config=generation_config)
+                text = (resp.text or "").strip()
+                last_text = text
+
+                # Strip accidental markdown fences just in case
+                text = re.sub(r"^```(?:json)?\s*", "", text)
+                text = re.sub(r"\s*```$", "", text)
+
+                data = json.loads(text)
+
+                # Shape validation
+                required = {"hook_kicker", "hook_html", "beats", "takeaway_html", "image_keywords"}
+                missing = required - data.keys()
+                if missing:
+                    raise ValueError(f"Gemini output missing keys: {missing}")
+                if not isinstance(data["beats"], list) or len(data["beats"]) != 2:
+                    raise ValueError(f"beats must be a list of exactly 2 items (got {len(data['beats']) if isinstance(data['beats'], list) else type(data['beats']).__name__})")
+                for b in data["beats"]:
+                    if "kicker" not in b or "text_html" not in b:
+                        raise ValueError("each beat needs 'kicker' and 'text_html'")
+
+                log.info("Gemini (%s) generated structured content on attempt %d", model_name, attempt)
+                return data
+
+            except Exception as e:
+                last_err = e
+                log.info("Gemini attempt %d/%s failed: %s", attempt, model_name, e)
+                continue
+
+    log.warning("Gemini structured generation failed after all retries (%s) - falling back", last_err)
+    if last_text:
+        log.warning("Last raw Gemini response (first 500 chars): %s", last_text[:500])
+    return _fallback_structured(source, author, category_label)
 
 
 def _fallback_structured(source: str, author: str | None, category_label: str) -> dict:
