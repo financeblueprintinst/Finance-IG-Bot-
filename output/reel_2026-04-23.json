@@ -1,8 +1,27 @@
 {
-  "category": "success_mindset",
-  "category_label": "SUCCESS MINDSET",
-  "text": "Compound interest isn't about out",
-  "author": "",
-  "caption": "The mindset that builds wealth isn't flashy — it's patient. Save this one.\n\n⚠️ Not financial advice. For educational purposes only.\n\n#mindset #success #wealthbuilding #discipline #finance #motivation #entrepreneur",
-  "audio_duration": 3.07
+  "category": "mindset",
+  "category_label": "Mindset",
+  "source_text": "the silent cost of lifestyle inflation",
+  "author": null,
+  "hook_kicker": "MINDSET",
+  "hook_html": "the silent cost",
+  "beats": [
+    {
+      "kicker": "THE PRINCIPLE",
+      "text_html": "the silent cost of lifestyle inflation"
+    },
+    {
+      "kicker": "WHY IT MATTERS",
+      "text_html": "Applied consistently, this principle compounds into serious wealth over decades."
+    }
+  ],
+  "takeaway_html": "<em>Discipline</em> over hype. <em>Time</em> over timing.",
+  "image_keywords": "finance stock market charts wealth",
+  "image_urls": [
+    "https://images.pexels.com/photos/7567233/pexels-photo-7567233.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/7876507/pexels-photo-7876507.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/30268012/pexels-photo-30268012.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+  ],
+  "caption": "the silent cost\n\nDiscipline over hype. Time over timing.\n\nFollow @financeblueprintdaily for daily mindset & market insights.\n\n#investing #wealthbuilding #financialfreedom #stockmarket #personalfinance #moneymindset #compound #valueinvesting #financialliteracy #warrenbuffett #stocks #wealth #passiveincome #moneytips #investmentstrategy\n\nNot financial advice. For informational purposes only.",
+  "duration": 25.0
 }
