@@ -71,7 +71,7 @@ def generate_caption(post_type: str, context: str) -> str:
             import google.generativeai as genai
 
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
+           model = genai.GenerativeModel("gemini-2.5-flash")
             resp = model.generate_content(
                 _build_prompt(post_type, context),
                 generation_config={"temperature": 0.7, "max_output_tokens": 220},
