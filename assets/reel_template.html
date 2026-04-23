@@ -1,1 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>FinanceBlueprint Reel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #050507;
+      --fg: #ffffff;
+      --muted: rgba(255,255,255,0.6);
+      --accent: #d4af37;
+      --accent-glow: #d4af37;
+      --accent-2: #7b61ff;
+      --card-bg: rgba(255,255,255,0.055);
+      --card-border: rgba(255,255,255,0.12);
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 1080px;
+      height: 1920px;
+      overflow: hidden;
+      background: var(--bg);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--fg);
+    }
+
+    /* Root container = full 1080x1920 */
+    .frame { position: relative; width: 100%; height: 100%; isolation: isolate; overflow: hidden; }
+
+    /* Background image cross-fade layers */
+    .bg-image {
+      position: absolute; inset: 0;
+      background-size: cover;
+      background-position: center;
+      opacity: 0;
+      transition: opacity 1.6s var(--ease);
+      animation: kenburns 15s var(--ease) infinite alternate;
+      z-index: 0;
+    }
+    .bg-image.active { opacity: 0.4; }
+    #bg1 { background-image: url('{{BG1_URL}}'); }
+    #bg2 { background-image: url('{{BG2_URL}}'); }
+    #bg3 { background-image: url('{{BG3_URL}}'); }
+    @keyframes kenburns {
+      0%   { transform: scale(1.03) translate(0, 0); }
+      100% { transform: scale(1.20) translate(-2%, -2%); }
+    }
+
+    /* Dark overlay for text readability */
+    .overlay {
+      position: absolute; inset: 0; z-index: 1;
+      background:
+        radial-gradient(ellipse at 50% 32%, rgba(0,0,0,0) 0%, rgba(5,5,7,0.38) 40%, rgba(5,5,7,0.94) 78%),
+        linear-gradient(to bottom, rgba(5,5,7,0.5), rgba(5,5,7,0.72) 60%, rgba(5,5,7,0.96));
+    }
+
+    /* Ambient glows */
+    .glow { position: absolute; width: 1100px; height: 1100px; filter: blur(110px); z-index: 2; border-radius: 50%; }
+    .g1 {
+      top: -300px; left: -400px;
+      background: radial-gradient(circle, rgba(212,175,55,0.22), transparent 65%);
+      animation: float1 22s ease-in-out infinite alternate;
+    }
+    .g2 {
+      bottom: -400px; right: -380px;
+      background: radial-gradient(circle, rgba(123,97,255,0.28), transparent 65%);
+      animation: float2 26s ease-in-out infinite alternate;
+    }
+    @keyframes float1 { 0% {transform: translate(0,0);} 100% {transform: translate(160px,120px);} }
+    @keyframes float2 { 0% {transform: translate(0,0);} 100% {transform: translate(-140px,-100px);} }
+
+    /* Brand header */
+    .brand {
+      position: absolute;
+      top: 72px; left: 68px; right: 68px;
+      display: flex; justify-content: space-between; align-items: center;
+      z-index: 10;
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: 4.5px;
+      color: rgba(255,255,255,0.78);
+      text-transform: uppercase;
+    }
+    .brand .logo-wrap { display: flex; align-items: center; gap: 20px; }
+    .brand .dot {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 28px var(--accent-glow);
+    }
+    .brand .category { color: var(--accent); font-weight: 800; letter-spacing: 5px; }
+
+    /* Timeline progress dots */
+    .timeline {
+      position: absolute;
+      top: 48px; left: 50%;
+      transform: translateX(-50%);
+      display: flex; gap: 10px;
+      z-index: 10;
+    }
+    .timeline .tdot {
+      width: 94px; height: 5px;
+      background: rgba(255,255,255,0.18);
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+    .timeline .tdot.active::after {
+      content: "";
+      position: absolute; inset: 0;
+      background: var(--accent);
+      transform-origin: left;
+      animation: progress 5s linear forwards;
+    }
+    @keyframes progress {
+      from { transform: scaleX(0); }
+      to { transform: scaleX(1); }
+    }
+
+    /* Scenes */
+    .scenes { position: absolute; inset: 0; z-index: 5; }
+    .scene {
+      position: absolute;
+      inset: 220px 88px 240px 88px;
+      display: flex; flex-direction: column; justify-content: center;
+      opacity: 0;
+      transform: translateY(60px) scale(0.985);
+      transition: opacity 1.1s var(--ease), transform 1.1s var(--ease), filter 1.1s var(--ease);
+      filter: blur(14px);
+      pointer-events: none;
+    }
+    .scene.active {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      filter: blur(0);
+    }
+
+    /* Glass card */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 48px;
+      padding: 76px 64px;
+      backdrop-filter: blur(36px) saturate(140%);
+      -webkit-backdrop-filter: blur(36px) saturate(140%);
+      box-shadow:
+        0 60px 140px rgba(0,0,0,0.55),
+        inset 0 1px 0 rgba(255,255,255,0.14);
+    }
+
+    .kicker {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: 6.5px;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 36px;
+      display: flex; align-items: center; gap: 20px;
+    }
+    .kicker::before {
+      content: "";
+      display: inline-block;
+      width: 36px; height: 2px;
+      background: var(--accent);
+    }
+
+    .hook-text {
+      font-family: 'Instrument Serif', serif;
+      font-size: 108px;
+      line-height: 1.05;
+      font-weight: 400;
+      color: var(--fg);
+      letter-spacing: -1.2px;
+    }
+    .hook-text em { font-style: italic; color: var(--accent); }
+
+    .beat-text {
+      font-size: 56px;
+      line-height: 1.32;
+      font-weight: 500;
+      color: var(--fg);
+      letter-spacing: -0.5px;
+    }
+    .beat-text .highlight { color: var(--accent); font-weight: 700; }
+    .beat-text .big {
+      font-size: 84px;
+      font-weight: 800;
+      color: var(--accent);
+      letter-spacing: -1.2px;
+      display: inline-block;
+      line-height: 1;
+    }
+
+    .takeaway {
+      font-family: 'Instrument Serif', serif;
+      font-size: 88px;
+      line-height: 1.17;
+      font-weight: 400;
+      color: var(--fg);
+      text-align: center;
+      letter-spacing: -0.8px;
+    }
+    .takeaway em { font-style: italic; color: var(--accent); }
+
+    /* Outro */
+    .scene.outro { align-items: center; justify-content: center; }
+    .lock-logo {
+      font-size: 48px;
+      font-weight: 900;
+      letter-spacing: 10px;
+      color: var(--fg);
+      margin-bottom: 36px;
+      text-align: center;
+    }
+    .lock-logo span { color: var(--accent); }
+    .handle {
+      font-size: 38px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.82);
+      letter-spacing: 3px;
+      text-align: center;
+      display: flex; align-items: center; gap: 18px;
+    }
+    .ig-icon {
+      width: 40px; height: 40px;
+      border: 3px solid rgba(255,255,255,0.82);
+      border-radius: 12px;
+      position: relative;
+    }
+    .ig-icon::before {
+      content: "";
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 18px; height: 18px;
+      border: 3px solid rgba(255,255,255,0.82);
+      border-radius: 50%;
+    }
+
+    /* Footer disclaimer */
+    .footer {
+      position: absolute;
+      bottom: 72px; left: 0; right: 0;
+      text-align: center;
+      z-index: 10;
+      font-size: 22px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.4);
+      letter-spacing: 3px;
+    }
+
+    /* Vignette on top */
+    .vignette {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.5) 100%);
+      z-index: 6;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+<div class="frame">
+  <div class="bg-image" id="bg1"></div>
+  <div class="bg-image" id="bg2"></div>
+  <div class="bg-image" id="bg3"></div>
+
+  <div class="overlay"></div>
+  <div class="glow g1"></div>
+  <div class="glow g2"></div>
+
+  <div class="timeline">
+    <div class="tdot"></div>
+    <div class="tdot"></div>
+    <div class="tdot"></div>
+    <div class="tdot"></div>
+    <div class="tdot"></div>
+  </div>
+
+  <div class="brand">
+    <div class="logo-wrap">
+      <div class="dot"></div>
+      <span>{{BRAND_NAME}}</span>
+    </div>
+    <span class="category">{{CATEGORY}}</span>
+  </div>
+
+  <div class="scenes">
+    <!-- Scene 1: Hook -->
+    <div class="scene" data-scene="0">
+      <div class="kicker">{{HOOK_KICKER}}</div>
+      <div class="hook-text">{{HOOK_HTML}}</div>
+    </div>
+
+    <!-- Scene 2: Beat 1 -->
+    <div class="scene" data-scene="1">
+      <div class="card">
+        <div class="kicker">{{BEAT_1_KICKER}}</div>
+        <div class="beat-text">{{BEAT_1_HTML}}</div>
+      </div>
+    </div>
+
+    <!-- Scene 3: Beat 2 -->
+    <div class="scene" data-scene="2">
+      <div class="card">
+        <div class="kicker">{{BEAT_2_KICKER}}</div>
+        <div class="beat-text">{{BEAT_2_HTML}}</div>
+      </div>
+    </div>
+
+    <!-- Scene 4: Takeaway -->
+    <div class="scene" data-scene="3">
+      <div class="takeaway">{{TAKEAWAY_HTML}}</div>
+    </div>
+
+    <!-- Scene 5: Outro -->
+    <div class="scene outro" data-scene="4">
+      <div class="lock-logo">FINANCE<span>BLUEPRINT</span></div>
+      <div class="handle">
+        <span class="ig-icon"></span>
+        <span>{{BRAND_HANDLE}}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">NOT FINANCIAL ADVICE · FOR INFORMATION ONLY</div>
+  <div class="vignette"></div>
+</div>
+
+<script>
+  const scenes = document.querySelectorAll('.scene');
+  const bgs = document.querySelectorAll('.bg-image');
+  const dots = document.querySelectorAll('.timeline .tdot');
+  let current = 0;
+  let bgIdx = 0;
+  const sceneDur = 5000;
+
+  function advance() {
+    scenes.forEach((s, i) => s.classList.toggle('active', i === current));
+    dots.forEach((d, i) => {
+      d.classList.toggle('active', i === current);
+      if (i === current) {
+        // Restart progress animation
+        const after = d.querySelector('::after');
+      }
+    });
+    if (current % 2 === 0) {
+      bgs.forEach((b, i) => b.classList.toggle('active', i === bgIdx));
+      bgIdx = (bgIdx + 1) % bgs.length;
+    }
+    current = (current + 1) % scenes.length;
+  }
+
+  // Signal when ready for video recording
+  window.READY = false;
+  window.addEventListener('load', async () => {
+    try { await document.fonts.ready; } catch (e) {}
+    // Force BG images to preload
+    await Promise.all(Array.from(bgs).map(b => {
+      return new Promise(resolve => {
+        const url = getComputedStyle(b).backgroundImage.slice(5, -2);
+        const img = new Image();
+        img.onload = img.onerror = () => resolve();
+        img.src = url;
+      });
+    }));
+    window.READY = true;
+    advance();
+    setInterval(advance, sceneDur);
+  });
+</script>
+
+</body>
+</html>
 
