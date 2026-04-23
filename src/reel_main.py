@@ -1,15 +1,16 @@
-"""Entry point for scheduled Reel posts.
+"""Entry point for scheduled Reel posts (v2, premium-style).
 
-Has two phases matching the GitHub Actions workflow:
+Two-phase workflow (matches GitHub Actions):
 
-  --render-only   Pick today's content, call Gemini (if needed), TTS, render
-                  the MP4, write a sidecar .json with the caption. Skip publish.
+  --render-only   Pick today's content, call Gemini for structured output,
+                  pull Pexels images, render the MP4 via Playwright+ffmpeg,
+                  write JSON sidecar with caption. No publish.
 
-  (default)       Same as above, plus publish to Instagram. If a .json sidecar
-  --publish-existing
-                  for today already exists on disk (from a prior render phase),
-                  the cached caption + video are reused — this keeps render
-                  and publish phases consistent even if Gemini is stochastic.
+  --publish-existing  Reuse the MP4 + sidecar from a prior render phase.
+                      Publish it to Instagram. Keeps render and publish
+                      deterministic across the 2-phase CI job.
+
+  (default, no flags)  Do both in one go (useful for local full-runs).
 """
 from __future__ import annotations
 
@@ -23,8 +24,8 @@ from pathlib import Path
 from config import BRAND_HANDLE, BRAND_NAME, DRY_RUN, OUTPUT_DIR
 from content_library import ContentItem, build_reel_caption, pick_content
 from instagram_publisher import publish_reel
-from reel_generator import render_reel
-from tts_generator import generate_speech
+from pexels_client import search_portrait_images
+from reel_renderer import render_reel
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,52 +34,61 @@ logging.basicConfig(
 log = logging.getLogger("reel_main")
 
 
-def _paths_for(today: date) -> tuple[Path, Path, Path]:
+def _paths_for(today: date) -> tuple[Path, Path]:
     stem = f"reel_{today.isoformat()}"
     return (
-        OUTPUT_DIR / f"{stem}.mp3",
         OUTPUT_DIR / f"{stem}.mp4",
         OUTPUT_DIR / f"{stem}.json",
     )
 
 
-def _write_meta(meta_path: Path, item: ContentItem, caption: str,
-                duration: float) -> None:
+def _write_meta(meta_path: Path, item: ContentItem, image_urls: list[str],
+                caption: str, duration: float) -> None:
     meta = {
         "category": item.category,
         "category_label": item.category_label,
-        "text": item.text,
+        "source_text": item.source_text,
         "author": item.author,
+        "hook_kicker": item.hook_kicker,
+        "hook_html": item.hook_html,
+        "beats": item.beats,
+        "takeaway_html": item.takeaway_html,
+        "image_keywords": item.image_keywords,
+        "image_urls": image_urls,
         "caption": caption,
-        "audio_duration": duration,
+        "duration": duration,
     }
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False),
                          encoding="utf-8")
 
 
 def _render(today: date) -> tuple[Path, str]:
-    audio_path, video_path, meta_path = _paths_for(today)
+    video_path, meta_path = _paths_for(today)
 
     item = pick_content(today)
-    log.info("Picked: %s / author=%r / %d chars",
-             item.category, item.author, len(item.text))
-    log.info("Text: %s", item.text)
+    log.info("Content: category=%s author=%s keywords=%r",
+             item.category, item.author, item.image_keywords)
+    log.info("Hook: %s", item.hook_html)
+    log.info("Beat 1 [%s]: %s", item.beats[0]["kicker"], item.beats[0]["text_html"])
+    log.info("Beat 2 [%s]: %s", item.beats[1]["kicker"], item.beats[1]["text_html"])
+    log.info("Takeaway: %s", item.takeaway_html)
 
-    duration = generate_speech(item.text, audio_path)
-    log.info("Voiceover: %.2fs at %s", duration, audio_path)
+    image_urls = search_portrait_images(item.image_keywords, count=3)
+    log.info("Background images: %s", image_urls)
 
-    render_reel(item, audio_path, video_path, BRAND_NAME, BRAND_HANDLE)
+    duration = render_reel(item, image_urls, video_path, BRAND_NAME, BRAND_HANDLE)
+
     caption = build_reel_caption(item)
     log.info("Caption:\n%s", caption)
 
-    _write_meta(meta_path, item, caption, duration)
+    _write_meta(meta_path, item, image_urls, caption, duration)
     log.info("Sidecar metadata: %s", meta_path)
 
     return video_path, caption
 
 
 def _load_existing(today: date) -> tuple[Path, str]:
-    _, video_path, meta_path = _paths_for(today)
+    video_path, meta_path = _paths_for(today)
     if not video_path.exists():
         raise SystemExit(f"No rendered reel found for {today} at {video_path}")
     if not meta_path.exists():
@@ -114,7 +124,7 @@ def run(dry_run: bool, render_only: bool, publish_existing: bool) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
-                        help="Generate audio + video but skip IG publish.")
+                        help="Generate the reel but skip IG publish.")
     parser.add_argument("--render-only", action="store_true",
                         help="Render phase of the 2-phase workflow (no publish).")
     parser.add_argument("--publish-existing", action="store_true",
