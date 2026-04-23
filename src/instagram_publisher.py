@@ -36,6 +36,8 @@ def build_public_url(image_path: Path) -> str:
     """
     repo = os.environ["GITHUB_REPO"]
     branch = os.environ.get("GITHUB_REF_NAME", "main")
+    # image_path is absolute; we want the path relative to repo root.
+    # Assumes the repo root is the parent of src/ and output/.
     repo_root = Path(__file__).resolve().parent.parent
     rel = image_path.resolve().relative_to(repo_root)
     return f"https://raw.githubusercontent.com/{repo}/{branch}/{rel.as_posix()}"
@@ -88,6 +90,7 @@ def _publish(account_id: str, token: str, container_id: str) -> str:
         if r.ok:
             return r.json()["id"]
         last_err = f"{r.status_code} {r.text}"
+        # Only retry on the specific "not ready yet" transient error
         try:
             err = r.json().get("error", {})
             if err.get("code") == 9007 or "not ready" in err.get("message", "").lower():
@@ -119,4 +122,53 @@ def publish_image(image_path: Path, caption: str, dry_run: bool = False) -> str 
     _wait_ready(container_id, token)
     media_id = _publish(account_id, token, container_id)
     log.info("Published media %s", media_id)
+    return media_id
+
+
+# ---------------------------------------------------------------------------
+# Reels publishing
+# ---------------------------------------------------------------------------
+def _create_reel_container(account_id: str, token: str, video_url: str,
+                           caption: str) -> str:
+    r = requests.post(
+        f"{GRAPH_BASE}/{account_id}/media",
+        data={
+            "media_type": "REELS",
+            "video_url": video_url,
+            "caption": caption,
+            "share_to_feed": "true",
+            "access_token": token,
+        },
+        timeout=60,
+    )
+    if not r.ok:
+        raise InstagramPublisherError(
+            f"Create reel container failed: {r.status_code} {r.text}"
+        )
+    return r.json()["id"]
+
+
+def publish_reel(video_path: Path, caption: str, dry_run: bool = False) -> str | None:
+    """Publish a video as an Instagram Reel.
+
+    Reels go through the same container → wait → publish dance, but the
+    processing window is much longer (video transcoding can take 30–120s
+    on IG's side), so we bump the status-polling timeout to 10 minutes.
+    """
+    video_url = build_public_url(video_path)
+    log.info("Public video URL: %s", video_url)
+
+    if dry_run:
+        log.info("DRY_RUN=1 — skipping Instagram reel publish.")
+        log.info("Caption:\n%s", caption)
+        return None
+
+    token = os.environ["IG_ACCESS_TOKEN"]
+    account_id = os.environ["IG_BUSINESS_ACCOUNT_ID"]
+
+    container_id = _create_reel_container(account_id, token, video_url, caption)
+    log.info("Created reel container %s", container_id)
+    _wait_ready(container_id, token, timeout_s=600)
+    media_id = _publish(account_id, token, container_id)
+    log.info("Published reel %s", media_id)
     return media_id
