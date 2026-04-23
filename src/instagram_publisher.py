@@ -36,8 +36,6 @@ def build_public_url(image_path: Path) -> str:
     """
     repo = os.environ["GITHUB_REPO"]
     branch = os.environ.get("GITHUB_REF_NAME", "main")
-    # image_path is absolute; we want the path relative to repo root.
-    # Assumes the repo root is the parent of src/ and output/.
     repo_root = Path(__file__).resolve().parent.parent
     rel = image_path.resolve().relative_to(repo_root)
     return f"https://raw.githubusercontent.com/{repo}/{branch}/{rel.as_posix()}"
@@ -55,6 +53,10 @@ def _create_container(account_id: str, token: str, image_url: str, caption: str)
 
 
 def _wait_ready(container_id: str, token: str, timeout_s: int = 120) -> None:
+    # Initial grace period: IG needs a few seconds even before the status endpoint
+    # starts reporting anything meaningful. Skipping this often yields FINISHED
+    # immediately but the publish endpoint then errors with "Media not ready".
+    time.sleep(5)
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         r = requests.get(
@@ -73,14 +75,30 @@ def _wait_ready(container_id: str, token: str, timeout_s: int = 120) -> None:
 
 
 def _publish(account_id: str, token: str, container_id: str) -> str:
-    r = requests.post(
-        f"{GRAPH_BASE}/{account_id}/media_publish",
-        data={"creation_id": container_id, "access_token": token},
-        timeout=30,
-    )
-    if not r.ok:
-        raise InstagramPublisherError(f"Publish failed: {r.status_code} {r.text}")
-    return r.json()["id"]
+    # Retry with backoff: even after status=FINISHED, the publish endpoint can
+    # transiently return "Media ID is not available" (code 9007) while IG's
+    # internals catch up. Retry a few times before giving up.
+    last_err = None
+    for attempt in range(6):
+        r = requests.post(
+            f"{GRAPH_BASE}/{account_id}/media_publish",
+            data={"creation_id": container_id, "access_token": token},
+            timeout=30,
+        )
+        if r.ok:
+            return r.json()["id"]
+        last_err = f"{r.status_code} {r.text}"
+        try:
+            err = r.json().get("error", {})
+            if err.get("code") == 9007 or "not ready" in err.get("message", "").lower():
+                log.info("Publish not ready yet (attempt %d/6), retrying in %ds",
+                         attempt + 1, 5 + attempt * 3)
+                time.sleep(5 + attempt * 3)
+                continue
+        except Exception:
+            pass
+        break
+    raise InstagramPublisherError(f"Publish failed: {last_err}")
 
 
 def publish_image(image_path: Path, caption: str, dry_run: bool = False) -> str | None:
