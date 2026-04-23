@@ -8,4 +8,7 @@ venv/
 # Keep the output folder but ignore locally generated images during dev.
 # The GitHub Action commits them when running in CI.
 output/*.png
+output/*.mp4
+output/*.mp3
+output/*.json
 !output/.gitkeep
