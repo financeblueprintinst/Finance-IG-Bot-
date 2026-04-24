@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 
 from content_library import ContentItem
+from slideshow_content import SlideshowStory
 
 log = logging.getLogger(__name__)
 
@@ -24,14 +25,16 @@ DURATION_S = 25  # must match CSS: 5 scenes × 5s each
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_PATH = _REPO_ROOT / "assets" / "reel_template.html"
+SLIDESHOW_TEMPLATE_PATH = _REPO_ROOT / "assets" / "reel_slideshow_template.html"
 MUSIC_DIR = _REPO_ROOT / "assets" / "music"
 
 
 # ---------------------------------------------------------------------------
 # Template filling
 # ---------------------------------------------------------------------------
-def _render_template(context: dict) -> str:
-    html = TEMPLATE_PATH.read_text(encoding="utf-8")
+def _render_template(context: dict, template_path: Path | None = None) -> str:
+    path = template_path or TEMPLATE_PATH
+    html = path.read_text(encoding="utf-8")
     for k, v in context.items():
         html = html.replace("{{" + k + "}}", str(v))
     return html
@@ -127,14 +130,16 @@ def _finalize(video_webm: Path, music: Path | None, out_mp4: Path) -> None:
 
     # Quality-oriented encode for 1080x1920 portrait content.
     #
-    # Two big levers for perceived quality/smoothness:
-    #   1) Motion interpolation: Playwright records WebM at a fixed ~25 fps.
-    #      During CSS transitions that's visibly choppy. We use the
-    #      minterpolate filter to synthesize intermediate frames up to 60 fps
-    #      (motion-compensated) before downsampling to a clean CFR 30 fps.
-    #   2) Rate control: pure CRF was producing ~1 Mbps on mostly-dark frames
-    #      which makes gradients band and text look soft. Force a higher
-    #      target bitrate so Instagram's re-encode has more to work with.
+    # Motion interpolation (minterpolate, mi_mode=mci) synthesises fully
+    # motion-compensated intermediate frames so 25 fps Playwright output
+    # becomes buttery-smooth 60 fps. Tradeoff: costs ~10-15 min of CI
+    # compute per render, but the user explicitly preferred waiting over
+    # any quality regression. fps=30 then brings it back to the target
+    # output rate without losing the smoothness.
+    #
+    # Rate control: pure CRF was producing ~1 Mbps on mostly-dark frames
+    # which makes gradients band and text look soft. We force a higher
+    # target bitrate so Instagram's re-encode has more to work with.
     vf_filter = (
         "minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:"
         "vsbmc=1,fps=30,format=yuv420p"
@@ -192,8 +197,13 @@ def _finalize(video_webm: Path, music: Path | None, out_mp4: Path) -> None:
 # Public entry point
 # ---------------------------------------------------------------------------
 def render_reel(item: ContentItem, image_urls: list[str], out_mp4: Path,
-                brand_name: str, brand_handle: str) -> float:
+                brand_name: str, brand_handle: str,
+                template_path: Path | None = None) -> float:
     """Render a reel from a structured ContentItem + 3 background image URLs.
+
+    `template_path` lets the caller swap the HTML template (e.g. the
+    slideshow variant) while keeping the rest of the pipeline identical —
+    same placeholder names, same Playwright flow, same ffmpeg finalisation.
 
     Returns the final video duration in seconds.
     """
@@ -203,7 +213,7 @@ def render_reel(item: ContentItem, image_urls: list[str], out_mp4: Path,
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     ctx = _build_context(item, image_urls, brand_name, brand_handle)
-    html = _render_template(ctx)
+    html = _render_template(ctx, template_path=template_path)
     html_path = tmp_dir / "reel.html"
     html_path.write_text(html, encoding="utf-8")
     log.info("Template rendered: %s", html_path)
@@ -220,6 +230,74 @@ def render_reel(item: ContentItem, image_urls: list[str], out_mp4: Path,
 
     _finalize(webm, music, out_mp4)
     log.info("Final reel written: %s", out_mp4)
+
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    return float(DURATION_S)
+
+
+# ---------------------------------------------------------------------------
+# Slideshow pipeline (news-carousel style). Different content shape than the
+# animated reel (5 independent slides + 5 independent images), so it builds
+# its own context dict and uses its own template — but reuses the same
+# Playwright recording + ffmpeg finalisation path.
+# ---------------------------------------------------------------------------
+def _build_slideshow_context(story: SlideshowStory, image_urls: list[str],
+                             brand_footer: str) -> dict:
+    """Map a SlideshowStory + 5 Pexels images onto the slideshow template."""
+    # Defensive: if Pexels/fallback returned <5 URLs, cycle.
+    imgs = list(image_urls)
+    while len(imgs) < 5:
+        imgs.append(imgs[len(imgs) % max(1, len(imgs))] if imgs else "")
+
+    slides = story.slides
+    ctx = {
+        "BADGE_LABEL": story.category_label,
+        "BRAND_FOOTER": brand_footer,
+    }
+    for i in range(5):
+        ctx[f"BG_{i+1}_URL"] = imgs[i]
+        ctx[f"SLIDE_{i+1}_HTML"] = slides[i]["text_html"]
+    return ctx
+
+
+def render_slideshow(story: SlideshowStory, image_urls: list[str], out_mp4: Path,
+                     brand_name: str, brand_handle: str) -> float:
+    """Render a news-carousel slideshow reel.
+
+    `image_urls` must contain exactly 5 entries (one per slide). Each slide
+    also carries its own `image_keywords` on the SlideshowStory, so the
+    caller is expected to have searched Pexels per-slide before calling in.
+
+    Brand footer prefers BRAND_HANDLE without the leading '@' (uppercase),
+    falling back to BRAND_NAME. That matches the "DAYTRADING.CO" aesthetic.
+    """
+    handle_clean = (brand_handle or "").lstrip("@").strip()
+    brand_footer = (handle_clean or brand_name).upper()
+
+    tmp_dir = out_mp4.parent / f"_{out_mp4.stem}_tmp"
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    ctx = _build_slideshow_context(story, image_urls, brand_footer)
+    html = _render_template(ctx, template_path=SLIDESHOW_TEMPLATE_PATH)
+    html_path = tmp_dir / "reel.html"
+    html_path.write_text(html, encoding="utf-8")
+    log.info("Slideshow template rendered: %s", html_path)
+
+    log.info("Recording Playwright video (%dx%d, ~%ds)…",
+             REEL_W, REEL_H, DURATION_S + 1)
+    webm = _record_video(html_path, tmp_dir)
+    log.info("Recorded %s (%.1f MB)", webm.name, webm.stat().st_size / 1e6)
+
+    music = _pick_music()
+    if music:
+        log.info("Music track picked: %s", music.name)
+    else:
+        log.info("No music tracks in assets/music/ — rendering silent")
+
+    _finalize(webm, music, out_mp4)
+    log.info("Final slideshow reel written: %s", out_mp4)
 
     shutil.rmtree(tmp_dir, ignore_errors=True)
     return float(DURATION_S)
