@@ -21,8 +21,25 @@ import random
 import re
 from dataclasses import dataclass
 from datetime import date
+from typing import TypedDict
 
 log = logging.getLogger(__name__)
+
+
+# TypedDict-based schema for Gemini's structured output mode.
+# This is the officially documented form in google-generativeai >= 0.7;
+# the raw dict form we tried first silently falls back to free-form JSON.
+class _Beat(TypedDict):
+    kicker: str
+    text_html: str
+
+
+class _ReelStructure(TypedDict):
+    hook_kicker: str
+    hook_html: str
+    beats: list[_Beat]
+    takeaway_html: str
+    image_keywords: str
 
 
 # ---------------------------------------------------------------------------
@@ -208,37 +225,19 @@ HARD RULES:
 """
 
 
-# JSON schema that Gemini must conform to. Enables clean structured output
-# and bypasses brittle free-form JSON parsing (which broke on quotes before).
-GEMINI_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "hook_kicker": {"type": "string"},
-        "hook_html": {"type": "string"},
-        "beats": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "kicker": {"type": "string"},
-                    "text_html": {"type": "string"},
-                },
-                "required": ["kicker", "text_html"],
-            },
-        },
-        "takeaway_html": {"type": "string"},
-        "image_keywords": {"type": "string"},
-    },
-    "required": ["hook_kicker", "hook_html", "beats", "takeaway_html", "image_keywords"],
-}
-
-
 def _generate_structured(source: str, author: str | None, category_label: str) -> dict:
     """Call Gemini to produce the 5-scene structure. Fall back on any error.
 
-    Uses Gemini's structured-output mode (response_mime_type=application/json
-    with response_schema) to guarantee valid JSON. Retries up to 3 times on
-    transient failures before giving up and falling back.
+    Uses Gemini's structured-output mode with a TypedDict response schema —
+    this is the officially documented form and forces Gemini to emit JSON that
+    actually validates (fixes the 'unterminated string' problem we hit with
+    raw dict schemas).
+
+    Tries gemini-2.5-flash first, then 2.0-flash, then 1.5-flash.
+    Only ONE attempt per model — retries burn through the free-tier quota
+    (10 req/min). On a 429 rate-limit error we abort the loop immediately
+    and fall back, because retrying other models in the same minute will hit
+    the same bucket.
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -259,48 +258,59 @@ def _generate_structured(source: str, author: str | None, category_label: str) -
         "temperature": 0.75,
         "max_output_tokens": 1200,
         "response_mime_type": "application/json",
-        "response_schema": GEMINI_SCHEMA,
+        "response_schema": _ReelStructure,  # TypedDict, not raw dict
     }
 
     last_err: Exception | None = None
-    last_text: str = ""
-    # Try multiple models in case one is unavailable in the current project.
     for model_name in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"):
-        for attempt in range(1, 3):  # 2 attempts per model
+        try:
+            model = genai.GenerativeModel(model_name)
+            resp = model.generate_content(prompt, generation_config=generation_config)
+            text = (resp.text or "").strip()
+
+            # With response_mime_type=application/json there should be no
+            # fences, but strip defensively.
+            text = re.sub(r"^```(?:json)?\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+
             try:
-                model = genai.GenerativeModel(model_name)
-                resp = model.generate_content(prompt, generation_config=generation_config)
-                text = (resp.text or "").strip()
-                last_text = text
-
-                # Strip accidental markdown fences just in case
-                text = re.sub(r"^```(?:json)?\s*", "", text)
-                text = re.sub(r"\s*```$", "", text)
-
                 data = json.loads(text)
-
-                # Shape validation
-                required = {"hook_kicker", "hook_html", "beats", "takeaway_html", "image_keywords"}
-                missing = required - data.keys()
-                if missing:
-                    raise ValueError(f"Gemini output missing keys: {missing}")
-                if not isinstance(data["beats"], list) or len(data["beats"]) != 2:
-                    raise ValueError(f"beats must be a list of exactly 2 items (got {len(data['beats']) if isinstance(data['beats'], list) else type(data['beats']).__name__})")
-                for b in data["beats"]:
-                    if "kicker" not in b or "text_html" not in b:
-                        raise ValueError("each beat needs 'kicker' and 'text_html'")
-
-                log.info("Gemini (%s) generated structured content on attempt %d", model_name, attempt)
-                return data
-
-            except Exception as e:
-                last_err = e
-                log.info("Gemini attempt %d/%s failed: %s", attempt, model_name, e)
+            except json.JSONDecodeError as je:
+                log.warning("Gemini %s: JSON parse error (%s). Raw response: %s",
+                            model_name, je, text[:500])
+                last_err = je
                 continue
 
-    log.warning("Gemini structured generation failed after all retries (%s) - falling back", last_err)
-    if last_text:
-        log.warning("Last raw Gemini response (first 500 chars): %s", last_text[:500])
+            # Shape validation — if Gemini returned something off-schema
+            required = {"hook_kicker", "hook_html", "beats", "takeaway_html", "image_keywords"}
+            missing = required - data.keys()
+            if missing:
+                log.warning("Gemini %s: missing keys %s. Raw: %s",
+                            model_name, missing, text[:500])
+                last_err = ValueError(f"missing keys {missing}")
+                continue
+            if not isinstance(data["beats"], list) or len(data["beats"]) != 2:
+                log.warning("Gemini %s: beats shape wrong. Raw: %s",
+                            model_name, text[:500])
+                last_err = ValueError("beats not a 2-item list")
+                continue
+
+            log.info("Gemini (%s) generated valid structured content", model_name)
+            return data
+
+        except Exception as e:
+            last_err = e
+            # On quota / rate-limit errors, retrying OTHER Gemini models is
+            # pointless — they share the same bucket. Bail out immediately.
+            err_s = str(e).lower()
+            if "429" in err_s or "quota" in err_s or "rate" in err_s:
+                log.warning("Gemini %s quota hit — aborting further attempts: %s",
+                            model_name, e)
+                break
+            log.info("Gemini %s failed (%s) — trying next model", model_name, e)
+            continue
+
+    log.warning("Gemini structured generation failed (%s) - falling back", last_err)
     return _fallback_structured(source, author, category_label)
 
 
