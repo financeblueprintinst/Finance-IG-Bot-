@@ -138,14 +138,11 @@
       transform: translate3d(0, 0, 0) scale(1);
     }
 
-    /* Glass card — light backdrop blur (8px) for depth without crushing
-       frame rate in SwiftShader. The card also carries a semi-transparent
-       gradient so even if backdrop-filter falls back to no-op, the card
-       still reads as "glass" against the BG image. */
+    /* Glass card */
     .card {
-      background: linear-gradient(135deg, rgba(30,30,38,0.58), rgba(18,18,24,0.52));
-      backdrop-filter: blur(8px) saturate(1.1);
-      -webkit-backdrop-filter: blur(8px) saturate(1.1);
+      background: linear-gradient(135deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025));
+      backdrop-filter: blur(18px) saturate(1.2);
+      -webkit-backdrop-filter: blur(18px) saturate(1.2);
       border: 1px solid var(--card-border);
       border-radius: 48px;
       padding: 76px 64px;
