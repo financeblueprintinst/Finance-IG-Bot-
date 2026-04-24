@@ -43,7 +43,7 @@
       will-change: transform, opacity;
       transform: translateZ(0);  /* force GPU compositing */
     }
-    .bg-image.active { opacity: 0.4; }
+    .bg-image.active { opacity: 0.55; }
     #bg1 { background-image: url('{{BG1_URL}}'); }
     #bg2 { background-image: url('{{BG2_URL}}'); }
     #bg3 { background-image: url('{{BG3_URL}}'); }
@@ -138,11 +138,14 @@
       transform: translate3d(0, 0, 0) scale(1);
     }
 
-    /* Glass card — semi-transparent solid bg instead of backdrop-filter.
-       backdrop-filter: blur() is ~10x slower than solid bg in software
-       rendering and was the biggest cause of laggy scene entrances. */
+    /* Glass card — light backdrop blur (8px) for depth without crushing
+       frame rate in SwiftShader. The card also carries a semi-transparent
+       gradient so even if backdrop-filter falls back to no-op, the card
+       still reads as "glass" against the BG image. */
     .card {
-      background: linear-gradient(135deg, rgba(30,30,38,0.78), rgba(18,18,24,0.72));
+      background: linear-gradient(135deg, rgba(30,30,38,0.58), rgba(18,18,24,0.52));
+      backdrop-filter: blur(8px) saturate(1.1);
+      -webkit-backdrop-filter: blur(8px) saturate(1.1);
       border: 1px solid var(--card-border);
       border-radius: 48px;
       padding: 76px 64px;
@@ -340,13 +343,12 @@
 
   function advance() {
     scenes.forEach((s, i) => s.classList.toggle('active', i === current));
-    dots.forEach((d, i) => {
-      d.classList.toggle('active', i === current);
-      if (i === current) {
-        // Restart progress animation
-        const after = d.querySelector('::after');
-      }
-    });
+    // First remove .active from all dots so the ::after progress animation
+    // can be cleanly restarted on the new active dot (re-adding the class
+    // after a forced reflow below re-triggers the @keyframes).
+    dots.forEach(d => d.classList.remove('active'));
+    void dots[current].offsetWidth;  // force reflow
+    dots[current].classList.add('active');
     if (current % 2 === 0) {
       bgs.forEach((b, i) => b.classList.toggle('active', i === bgIdx));
       bgIdx = (bgIdx + 1) % bgs.length;
