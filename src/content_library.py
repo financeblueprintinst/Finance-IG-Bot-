@@ -300,13 +300,14 @@ def _generate_structured(source: str, author: str | None, category_label: str) -
 
         except Exception as e:
             last_err = e
-            # On quota / rate-limit errors, retrying OTHER Gemini models is
-            # pointless — they share the same bucket. Bail out immediately.
             err_s = str(e).lower()
             if "429" in err_s or "quota" in err_s or "rate" in err_s:
-                log.warning("Gemini %s quota hit — aborting further attempts: %s",
+                # Each Gemini model has its own free-tier bucket, so a 429 on
+                # 2.5-flash does NOT imply 2.0-flash is also exhausted.
+                # Log and fall through to the next model.
+                log.warning("Gemini %s quota hit — trying next model: %s",
                             model_name, e)
-                break
+                continue
             log.info("Gemini %s failed (%s) — trying next model", model_name, e)
             continue
 
