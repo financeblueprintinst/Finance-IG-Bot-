@@ -11,6 +11,9 @@ Two-phase workflow (matches GitHub Actions):
                       deterministic across the 2-phase CI job.
 
   (default, no flags)  Do both in one go (useful for local full-runs).
+
+  --slideshow     Run the news-carousel slideshow pipeline instead of the
+                  animated reel. Used by the Mon/Wed/Fri workflow.
 """
 from __future__ import annotations
 
@@ -25,7 +28,12 @@ from config import BRAND_HANDLE, BRAND_NAME, DRY_RUN, OUTPUT_DIR
 from content_library import ContentItem, build_reel_caption, pick_content
 from instagram_publisher import publish_reel
 from pexels_client import search_portrait_images
-from reel_renderer import render_reel
+from reel_renderer import render_reel, render_slideshow
+from slideshow_content import (
+    SlideshowStory,
+    build_slideshow_caption,
+    pick_slideshow_story,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,17 +42,21 @@ logging.basicConfig(
 log = logging.getLogger("reel_main")
 
 
-def _paths_for(today: date) -> tuple[Path, Path]:
-    stem = f"reel_{today.isoformat()}"
+def _paths_for(today: date, slideshow: bool = False) -> tuple[Path, Path]:
+    # Slideshow variant gets its own filename stem so it can coexist with an
+    # animated reel on the same day (e.g. if someone manually dispatches both).
+    prefix = "reel_slideshow" if slideshow else "reel"
+    stem = f"{prefix}_{today.isoformat()}"
     return (
         OUTPUT_DIR / f"{stem}.mp4",
         OUTPUT_DIR / f"{stem}.json",
     )
 
 
-def _write_meta(meta_path: Path, item: ContentItem, image_urls: list[str],
-                caption: str, duration: float) -> None:
+def _write_meta_reel(meta_path: Path, item: ContentItem, image_urls: list[str],
+                     caption: str, duration: float) -> None:
     meta = {
+        "kind": "animated_reel",
         "category": item.category,
         "category_label": item.category_label,
         "source_text": item.source_text,
@@ -62,8 +74,27 @@ def _write_meta(meta_path: Path, item: ContentItem, image_urls: list[str],
                          encoding="utf-8")
 
 
-def _render(today: date) -> tuple[Path, str]:
-    video_path, meta_path = _paths_for(today)
+def _write_meta_slideshow(meta_path: Path, story: SlideshowStory,
+                          image_urls: list[str], caption: str,
+                          duration: float) -> None:
+    meta = {
+        "kind": "slideshow_reel",
+        "category": story.category,
+        "category_label": story.category_label,
+        "topic_title": story.topic_title,
+        "seed_text": story.seed_text,
+        "slides": story.slides,
+        "image_urls": image_urls,
+        "caption": caption,
+        "duration": duration,
+    }
+    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False),
+                         encoding="utf-8")
+
+
+def _render_animated(today: date) -> tuple[Path, str]:
+    """Animated reel pipeline (Tue/Thu/Sat/Sun)."""
+    video_path, meta_path = _paths_for(today, slideshow=False)
 
     item = pick_content(today)
     log.info("Content: category=%s author=%s keywords=%r",
@@ -76,19 +107,60 @@ def _render(today: date) -> tuple[Path, str]:
     image_urls = search_portrait_images(item.image_keywords, count=3)
     log.info("Background images: %s", image_urls)
 
-    duration = render_reel(item, image_urls, video_path, BRAND_NAME, BRAND_HANDLE)
+    duration = render_reel(
+        item, image_urls, video_path, BRAND_NAME, BRAND_HANDLE,
+    )
 
     caption = build_reel_caption(item)
     log.info("Caption:\n%s", caption)
 
-    _write_meta(meta_path, item, image_urls, caption, duration)
+    _write_meta_reel(meta_path, item, image_urls, caption, duration)
     log.info("Sidecar metadata: %s", meta_path)
 
     return video_path, caption
 
 
-def _load_existing(today: date) -> tuple[Path, str]:
-    video_path, meta_path = _paths_for(today)
+def _render_slideshow(today: date) -> tuple[Path, str]:
+    """Slideshow (news-carousel) pipeline (Mon/Wed/Fri).
+
+    Different content shape than the animated reel: one finance news story
+    spanning 5 slides, each with its OWN Pexels image (5 searches).
+    """
+    video_path, meta_path = _paths_for(today, slideshow=True)
+
+    story = pick_slideshow_story(today)
+    log.info("Slideshow story: %s (label=%s)", story.topic_title, story.category_label)
+    for i, sl in enumerate(story.slides, 1):
+        log.info("  Slide %d [%s]: %s",
+                 i, sl.get("image_keywords", "?"), sl.get("text_html", ""))
+
+    # One Pexels search per slide so every slide has its own themed background.
+    image_urls: list[str] = []
+    for i, sl in enumerate(story.slides, 1):
+        kw = sl.get("image_keywords") or story.topic_title
+        urls = search_portrait_images(kw, count=1)
+        image_urls.append(urls[0])
+        log.info("  Slide %d bg: %s -> %s", i, kw, urls[0])
+
+    duration = render_slideshow(
+        story, image_urls, video_path, BRAND_NAME, BRAND_HANDLE,
+    )
+
+    caption = build_slideshow_caption(story, BRAND_HANDLE)
+    log.info("Caption:\n%s", caption)
+
+    _write_meta_slideshow(meta_path, story, image_urls, caption, duration)
+    log.info("Sidecar metadata: %s", meta_path)
+
+    return video_path, caption
+
+
+def _render(today: date, slideshow: bool = False) -> tuple[Path, str]:
+    return _render_slideshow(today) if slideshow else _render_animated(today)
+
+
+def _load_existing(today: date, slideshow: bool = False) -> tuple[Path, str]:
+    video_path, meta_path = _paths_for(today, slideshow=slideshow)
     if not video_path.exists():
         raise SystemExit(f"No rendered reel found for {today} at {video_path}")
     if not meta_path.exists():
@@ -99,13 +171,14 @@ def _load_existing(today: date) -> tuple[Path, str]:
     return video_path, caption
 
 
-def run(dry_run: bool, render_only: bool, publish_existing: bool) -> int:
+def run(dry_run: bool, render_only: bool, publish_existing: bool,
+        slideshow: bool = False) -> int:
     today = date.today()
 
     if publish_existing:
-        video_path, caption = _load_existing(today)
+        video_path, caption = _load_existing(today, slideshow=slideshow)
     else:
-        video_path, caption = _render(today)
+        video_path, caption = _render(today, slideshow=slideshow)
 
     if render_only or dry_run:
         log.info("Skipping Instagram publish (render_only=%s dry_run=%s).",
@@ -129,11 +202,16 @@ def main() -> int:
                         help="Render phase of the 2-phase workflow (no publish).")
     parser.add_argument("--publish-existing", action="store_true",
                         help="Publish phase: reuse the reel rendered earlier today.")
+    parser.add_argument("--slideshow", action="store_true",
+                        help="Use the slideshow (news-carousel) pipeline. "
+                             "Used on Mon/Wed/Fri when the animated reel workflow "
+                             "does not run.")
     args = parser.parse_args()
     return run(
         dry_run=args.dry_run or DRY_RUN,
         render_only=args.render_only,
         publish_existing=args.publish_existing,
+        slideshow=args.slideshow,
     )
 
 
