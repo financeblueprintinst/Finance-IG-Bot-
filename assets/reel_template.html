@@ -120,22 +120,30 @@
       to { transform: scaleX(1); }
     }
 
-    /* Scenes — opacity + transform only, NO filter:blur. Filter blur during
-       transitions killed the frame rate in software-rendered headless Chromium. */
+    /* Scenes — longer, softer crossfade with a brief camera-focus style
+       blur-in applied via keyframes ONLY while entering. Keeping blur off
+       of hidden scenes avoids the 4×1080p blur-layer compositing cost that
+       previously starved setInterval on GitHub runners. */
     .scenes { position: absolute; inset: 0; z-index: 5; }
     .scene {
       position: absolute;
       inset: 220px 88px 240px 88px;
       display: flex; flex-direction: column; justify-content: center;
       opacity: 0;
-      transform: translate3d(0, 40px, 0) scale(0.985);
-      transition: opacity 0.9s var(--ease), transform 0.9s var(--ease);
+      transform: translate3d(0, 56px, 0) scale(0.975);
+      transition:
+        opacity 1.2s var(--ease),
+        transform 1.2s var(--ease);
       pointer-events: none;
-      will-change: opacity, transform;
     }
     .scene.active {
       opacity: 1;
       transform: translate3d(0, 0, 0) scale(1);
+      animation: scene-focus 1.1s var(--ease) both;
+    }
+    @keyframes scene-focus {
+      0%   { filter: blur(10px); }
+      100% { filter: blur(0); }
     }
 
     /* Glass card */
