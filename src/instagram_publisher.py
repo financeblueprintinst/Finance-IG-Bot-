@@ -36,8 +36,6 @@ def build_public_url(image_path: Path) -> str:
     """
     repo = os.environ["GITHUB_REPO"]
     branch = os.environ.get("GITHUB_REF_NAME", "main")
-    # image_path is absolute; we want the path relative to repo root.
-    # Assumes the repo root is the parent of src/ and output/.
     repo_root = Path(__file__).resolve().parent.parent
     rel = image_path.resolve().relative_to(repo_root)
     return f"https://raw.githubusercontent.com/{repo}/{branch}/{rel.as_posix()}"
@@ -55,9 +53,6 @@ def _create_container(account_id: str, token: str, image_url: str, caption: str)
 
 
 def _wait_ready(container_id: str, token: str, timeout_s: int = 120) -> None:
-    # Initial grace period: IG needs a few seconds even before the status endpoint
-    # starts reporting anything meaningful. Skipping this often yields FINISHED
-    # immediately but the publish endpoint then errors with "Media not ready".
     time.sleep(5)
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -77,9 +72,6 @@ def _wait_ready(container_id: str, token: str, timeout_s: int = 120) -> None:
 
 
 def _publish(account_id: str, token: str, container_id: str) -> str:
-    # Retry with backoff: even after status=FINISHED, the publish endpoint can
-    # transiently return "Media ID is not available" (code 9007) while IG's
-    # internals catch up. Retry a few times before giving up.
     last_err = None
     for attempt in range(6):
         r = requests.post(
@@ -90,7 +82,6 @@ def _publish(account_id: str, token: str, container_id: str) -> str:
         if r.ok:
             return r.json()["id"]
         last_err = f"{r.status_code} {r.text}"
-        # Only retry on the specific "not ready yet" transient error
         try:
             err = r.json().get("error", {})
             if err.get("code") == 9007 or "not ready" in err.get("message", "").lower():
@@ -149,12 +140,7 @@ def _create_reel_container(account_id: str, token: str, video_url: str,
 
 
 def publish_reel(video_path: Path, caption: str, dry_run: bool = False) -> str | None:
-    """Publish a video as an Instagram Reel.
-
-    Reels go through the same container → wait → publish dance, but the
-    processing window is much longer (video transcoding can take 30–120s
-    on IG's side), so we bump the status-polling timeout to 10 minutes.
-    """
+    """Publish a video as an Instagram Reel."""
     video_url = build_public_url(video_path)
     log.info("Public video URL: %s", video_url)
 
@@ -171,4 +157,83 @@ def publish_reel(video_path: Path, caption: str, dry_run: bool = False) -> str |
     _wait_ready(container_id, token, timeout_s=600)
     media_id = _publish(account_id, token, container_id)
     log.info("Published reel %s", media_id)
+    return media_id
+
+
+# ---------------------------------------------------------------------------
+# Carousel (multi-image swipeable post) publishing
+# ---------------------------------------------------------------------------
+def _create_carousel_child(account_id: str, token: str, image_url: str) -> str:
+    """Create a single child container for a carousel item."""
+    r = requests.post(
+        f"{GRAPH_BASE}/{account_id}/media",
+        data={
+            "image_url": image_url,
+            "is_carousel_item": "true",
+            "access_token": token,
+        },
+        timeout=30,
+    )
+    if not r.ok:
+        raise InstagramPublisherError(
+            f"Create carousel child failed: {r.status_code} {r.text}"
+        )
+    return r.json()["id"]
+
+
+def _create_carousel_parent(account_id: str, token: str,
+                            children_ids: list[str], caption: str) -> str:
+    """Create the parent CAROUSEL container."""
+    r = requests.post(
+        f"{GRAPH_BASE}/{account_id}/media",
+        data={
+            "media_type": "CAROUSEL",
+            "children": ",".join(children_ids),
+            "caption": caption,
+            "access_token": token,
+        },
+        timeout=30,
+    )
+    if not r.ok:
+        raise InstagramPublisherError(
+            f"Create carousel parent failed: {r.status_code} {r.text}"
+        )
+    return r.json()["id"]
+
+
+def publish_carousel(image_paths: list[Path], caption: str,
+                     dry_run: bool = False) -> str | None:
+    """Publish a swipeable multi-image carousel post."""
+    if not (2 <= len(image_paths) <= 10):
+        raise ValueError(
+            f"Carousel must have 2-10 images, got {len(image_paths)}"
+        )
+
+    image_urls = [build_public_url(p) for p in image_paths]
+    for i, u in enumerate(image_urls, 1):
+        log.info("Carousel slide %d URL: %s", i, u)
+
+    if dry_run:
+        log.info("DRY_RUN=1 — skipping Instagram carousel publish.")
+        log.info("Caption:\n%s", caption)
+        return None
+
+    token = os.environ["IG_ACCESS_TOKEN"]
+    account_id = os.environ["IG_BUSINESS_ACCOUNT_ID"]
+
+    children_ids: list[str] = []
+    for i, url in enumerate(image_urls, 1):
+        cid = _create_carousel_child(account_id, token, url)
+        log.info("Child %d container: %s", i, cid)
+        children_ids.append(cid)
+
+    time.sleep(3)
+
+    parent_id = _create_carousel_parent(account_id, token, children_ids, caption)
+    log.info("Created carousel parent %s with %d children",
+             parent_id, len(children_ids))
+
+    _wait_ready(parent_id, token, timeout_s=300)
+    media_id = _publish(account_id, token, parent_id)
+    log.info("Published carousel %s", media_id)
     return media_id
