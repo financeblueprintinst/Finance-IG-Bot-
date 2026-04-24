@@ -1,10 +1,11 @@
-name: Daily Slideshow Reel
+name: Daily Carousel Post
 
 # Runs on the days the animated reel (reel.yml) does NOT run.
 # Animated reel: Tue, Thu, Sat, Sun  → covered there.
-# Slideshow reel: Mon, Wed, Fri       → this workflow.
-# Both use the same two-phase render→commit→publish flow, so the only
-# differences below are the cron days and the --slideshow flag.
+# Carousel post: Mon, Wed, Fri       → this workflow.
+#
+# Posts a swipeable 5-image Instagram Carousel (not a video). Much lighter
+# render step than the reel — just Playwright screenshots, no ffmpeg.
 
 on:
   schedule:
@@ -19,12 +20,12 @@ on:
         default: false
 
 permissions:
-  contents: write  # to commit the generated MP4 / metadata json
+  contents: write  # to commit the generated JPGs / metadata json
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -32,9 +33,6 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-
-      - name: Install system ffmpeg
-        run: sudo apt-get update -q && sudo apt-get install -y ffmpeg
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
@@ -49,7 +47,7 @@ jobs:
       - name: Install Playwright Chromium
         run: python -m playwright install --with-deps chromium
 
-      - name: Render slideshow reel (video + metadata, no publish)
+      - name: Render carousel (5 JPGs + metadata, no publish)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -58,23 +56,23 @@ jobs:
           DRY_RUN: "1"
         run: python src/reel_main.py --render-only --slideshow
 
-      - name: Commit generated slideshow reel files
+      - name: Commit generated carousel files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f output/reel_slideshow_*.mp4 output/reel_slideshow_*.json || true
+          git add -f output/carousel_*.jpg output/carousel_*.json || true
           if ! git diff --cached --quiet; then
-            git commit -m "chore(slideshow-reel): $(date -u +%Y-%m-%d)"
+            git commit -m "chore(carousel): $(date -u +%Y-%m-%d)"
             git push
           else
-            echo "No new slideshow reel files to commit."
+            echo "No new carousel files to commit."
           fi
 
       - name: Wait for raw.githubusercontent CDN propagation
         if: ${{ !inputs.dry_run }}
         run: sleep 25
 
-      - name: Publish slideshow reel to Instagram
+      - name: Publish carousel to Instagram
         if: ${{ !inputs.dry_run }}
         env:
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
