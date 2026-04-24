@@ -38,16 +38,18 @@
       background-position: center;
       opacity: 0;
       transition: opacity 1.6s var(--ease);
-      animation: kenburns 15s var(--ease) infinite alternate;
+      animation: kenburns 18s var(--ease) infinite alternate;
       z-index: 0;
+      will-change: transform, opacity;
+      transform: translateZ(0);  /* force GPU compositing */
     }
     .bg-image.active { opacity: 0.4; }
     #bg1 { background-image: url('{{BG1_URL}}'); }
     #bg2 { background-image: url('{{BG2_URL}}'); }
     #bg3 { background-image: url('{{BG3_URL}}'); }
     @keyframes kenburns {
-      0%   { transform: scale(1.03) translate(0, 0); }
-      100% { transform: scale(1.20) translate(-2%, -2%); }
+      0%   { transform: translate3d(0, 0, 0) scale(1.03); }
+      100% { transform: translate3d(-2%, -2%, 0) scale(1.10); }
     }
 
     /* Dark overlay for text readability */
@@ -58,20 +60,18 @@
         linear-gradient(to bottom, rgba(5,5,7,0.5), rgba(5,5,7,0.72) 60%, rgba(5,5,7,0.96));
     }
 
-    /* Ambient glows */
-    .glow { position: absolute; width: 1100px; height: 1100px; filter: blur(110px); z-index: 2; border-radius: 50%; }
+    /* Ambient glows — static, rendered via radial-gradient (no filter: blur).
+       filter: blur(110px) is extremely expensive in software-rendered headless
+       Chromium and was one of the main causes of dropped frames. */
+    .glow { position: absolute; width: 1100px; height: 1100px; z-index: 2; border-radius: 50%; }
     .g1 {
       top: -300px; left: -400px;
-      background: radial-gradient(circle, rgba(212,175,55,0.22), transparent 65%);
-      animation: float1 22s ease-in-out infinite alternate;
+      background: radial-gradient(circle, rgba(212,175,55,0.18), transparent 65%);
     }
     .g2 {
       bottom: -400px; right: -380px;
-      background: radial-gradient(circle, rgba(123,97,255,0.28), transparent 65%);
-      animation: float2 26s ease-in-out infinite alternate;
+      background: radial-gradient(circle, rgba(123,97,255,0.22), transparent 65%);
     }
-    @keyframes float1 { 0% {transform: translate(0,0);} 100% {transform: translate(160px,120px);} }
-    @keyframes float2 { 0% {transform: translate(0,0);} 100% {transform: translate(-140px,-100px);} }
 
     /* Brand header */
     .brand {
@@ -120,32 +120,32 @@
       to { transform: scaleX(1); }
     }
 
-    /* Scenes */
+    /* Scenes — opacity + transform only, NO filter:blur. Filter blur during
+       transitions killed the frame rate in software-rendered headless Chromium. */
     .scenes { position: absolute; inset: 0; z-index: 5; }
     .scene {
       position: absolute;
       inset: 220px 88px 240px 88px;
       display: flex; flex-direction: column; justify-content: center;
       opacity: 0;
-      transform: translateY(60px) scale(0.985);
-      transition: opacity 1.1s var(--ease), transform 1.1s var(--ease), filter 1.1s var(--ease);
-      filter: blur(14px);
+      transform: translate3d(0, 40px, 0) scale(0.985);
+      transition: opacity 0.9s var(--ease), transform 0.9s var(--ease);
       pointer-events: none;
+      will-change: opacity, transform;
     }
     .scene.active {
       opacity: 1;
-      transform: translateY(0) scale(1);
-      filter: blur(0);
+      transform: translate3d(0, 0, 0) scale(1);
     }
 
-    /* Glass card */
+    /* Glass card — semi-transparent solid bg instead of backdrop-filter.
+       backdrop-filter: blur() is ~10x slower than solid bg in software
+       rendering and was the biggest cause of laggy scene entrances. */
     .card {
-      background: var(--card-bg);
+      background: linear-gradient(135deg, rgba(30,30,38,0.78), rgba(18,18,24,0.72));
       border: 1px solid var(--card-border);
       border-radius: 48px;
       padding: 76px 64px;
-      backdrop-filter: blur(36px) saturate(140%);
-      -webkit-backdrop-filter: blur(36px) saturate(140%);
       box-shadow:
         0 60px 140px rgba(0,0,0,0.55),
         inset 0 1px 0 rgba(255,255,255,0.14);
@@ -375,4 +375,3 @@
 
 </body>
 </html>
-
