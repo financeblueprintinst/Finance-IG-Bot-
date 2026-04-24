@@ -1,0 +1,27 @@
+{
+  "category": "investor_quotes",
+  "category_label": "Wisdom",
+  "source_text": "The investor's chief problem — and even his worst enemy — is likely to be himself.",
+  "author": "Benjamin Graham",
+  "hook_kicker": "WISDOM",
+  "hook_html": "<em>Benjamin Graham</em>",
+  "beats": [
+    {
+      "kicker": "THE GRAHAM PRINCIPLE",
+      "text_html": "The investor's chief problem — and even his worst enemy — is likely to be himself."
+    },
+    {
+      "kicker": "WHY IT MATTERS",
+      "text_html": "Applied consistently, this principle compounds into serious wealth over decades."
+    }
+  ],
+  "takeaway_html": "<em>Discipline</em> over hype. <em>Time</em> over timing.",
+  "image_keywords": "finance stock market charts wealth",
+  "image_urls": [
+    "https://images.pexels.com/photos/7567233/pexels-photo-7567233.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/7876507/pexels-photo-7876507.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/30268012/pexels-photo-30268012.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+  ],
+  "caption": "Benjamin Graham\n\nDiscipline over hype. Time over timing.\n\n- Benjamin Graham\n\nFollow @financeblueprintdaily for daily mindset & market insights.\n\n#investing #wealthbuilding #financialfreedom #stockmarket #personalfinance #moneymindset #compound #valueinvesting #financialliteracy #warrenbuffett #stocks #wealth #passiveincome #moneytips #investmentstrategy\n\nNot financial advice. For informational purposes only.",
+  "duration": 25.0
+}
