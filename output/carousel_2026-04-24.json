@@ -1,0 +1,44 @@
+{
+  "kind": "carousel_post",
+  "category": "nvidia_ai",
+  "category_label": "BREAKING",
+  "topic_title": "Nvidia: From Gaming to AI King",
+  "seed_text": "Nvidia's GPU business once served gamers. After ChatGPT's launch in late 2022, demand for its H100 and Blackwell AI chips exploded. Revenue tripled in 18 months, and in 2024 Nvidia crossed a $3 trillion market cap, briefly making it the world's most valuable company.",
+  "slides": [
+    {
+      "text_html": "NVIDIA'S GPU BUSINESS ONCE SERVED GAMERS.",
+      "image_keywords": "gpu chip circuit"
+    },
+    {
+      "text_html": "AFTER CHATGPT'S LAUNCH IN LATE <span class='h'>2022,</span> DEMAND FOR ITS H100 AND BLACKWELL AI CHIPS EXPLODED.",
+      "image_keywords": "ai data center"
+    },
+    {
+      "text_html": "REVENUE TRIPLED IN <span class='h'>18</span> MONTHS, AND IN 2024 NVIDIA CROSSED A $3 TRILLION MARKET CAP, BRIEFLY MAKING IT THE WORLD'S MOST VALUABLE COMPANY.",
+      "image_keywords": "server rack lights"
+    },
+    {
+      "text_html": "MORE DETAILS EMERGING AS THE STORY DEVELOPS.",
+      "image_keywords": "silicon wafer"
+    },
+    {
+      "text_html": "MORE DETAILS EMERGING AS THE STORY DEVELOPS.",
+      "image_keywords": "microchip close up"
+    }
+  ],
+  "image_urls": [
+    "https://images.pexels.com/photos/2582937/pexels-photo-2582937.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/5203849/pexels-photo-5203849.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/5203849/pexels-photo-5203849.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/33798628/pexels-photo-33798628.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/30083229/pexels-photo-30083229.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+  ],
+  "jpg_paths": [
+    "/home/runner/work/Finance-IG-Bot-/Finance-IG-Bot-/output/carousel_2026-04-24_1.jpg",
+    "/home/runner/work/Finance-IG-Bot-/Finance-IG-Bot-/output/carousel_2026-04-24_2.jpg",
+    "/home/runner/work/Finance-IG-Bot-/Finance-IG-Bot-/output/carousel_2026-04-24_3.jpg",
+    "/home/runner/work/Finance-IG-Bot-/Finance-IG-Bot-/output/carousel_2026-04-24_4.jpg",
+    "/home/runner/work/Finance-IG-Bot-/Finance-IG-Bot-/output/carousel_2026-04-24_5.jpg"
+  ],
+  "caption": "Nvidia: From Gaming to AI King\n\nNVIDIA'S GPU BUSINESS ONCE SERVED GAMERS.\n\nMORE DETAILS EMERGING AS THE STORY DEVELOPS.\n\nFollow @financeblueprintdaily for daily markets, money stories and investing insight.\n\n#finance #stockmarket #investing #trading #financenews #wallstreet #wealth #stocks #economy #markets #investor #moneymindset #financialfreedom #daytrading #crypto\n\nNot financial advice. For informational purposes only."
+}
