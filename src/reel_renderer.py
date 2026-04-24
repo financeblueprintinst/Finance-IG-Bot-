@@ -125,23 +125,30 @@ def _finalize(video_webm: Path, music: Path | None, out_mp4: Path) -> None:
     """Convert WebM → MP4 at exact DURATION_S, muxing music if provided."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
 
-    # Quality-oriented encode for 1080x1920 portrait content:
-    #   - CRF 18 keeps text/edges crisp (22 was producing ~840 kbps which
-    #     softened type noticeably)
-    #   - -maxrate / -bufsize cap peak bitrate so Instagram's ingestion
-    #     doesn't re-transcode aggressively
-    #   - preset slow costs ~15s more render time but gives ~20% better
-    #     perceptual quality at the same bitrate
+    # Quality-oriented encode for 1080x1920 portrait content.
+    #
+    # Two big levers for perceived quality/smoothness:
+    #   1) Motion interpolation: Playwright records WebM at a fixed ~25 fps.
+    #      During CSS transitions that's visibly choppy. We use the
+    #      minterpolate filter to synthesize intermediate frames up to 60 fps
+    #      (motion-compensated) before downsampling to a clean CFR 30 fps.
+    #   2) Rate control: pure CRF was producing ~1 Mbps on mostly-dark frames
+    #      which makes gradients band and text look soft. Force a higher
+    #      target bitrate so Instagram's re-encode has more to work with.
+    vf_filter = (
+        "minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:"
+        "vsbmc=1,fps=30,format=yuv420p"
+    )
     common = [
         "-t", str(DURATION_S),
+        "-vf", vf_filter,
         "-c:v", "libx264",
         "-preset", "slow",
-        "-crf", "18",
-        "-maxrate", "10M",
-        "-bufsize", "16M",
-        "-pix_fmt", "yuv420p",
+        "-crf", "17",
+        "-b:v", "6M",
+        "-maxrate", "9M",
+        "-bufsize", "14M",
         "-movflags", "+faststart",
-        "-r", "30",
         "-profile:v", "high",
         "-level", "4.1",
     ]
