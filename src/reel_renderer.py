@@ -71,6 +71,17 @@ def _record_video(html_path: Path, tmp_dir: Path) -> Path:
                 "--disable-dev-shm-usage",
                 "--no-sandbox",
                 "--disable-blink-features=AutomationControlled",
+                # Force GPU compositing + ANGLE for smoother CSS animations
+                # even without real hardware GPU on CI runners.
+                "--enable-gpu-rasterization",
+                "--enable-zero-copy",
+                "--ignore-gpu-blocklist",
+                "--use-gl=angle",
+                "--use-angle=swiftshader",
+                # Avoid throttling of animations when tab is "backgrounded".
+                "--disable-background-timer-throttling",
+                "--disable-renderer-backgrounding",
+                "--disable-backgrounding-occluded-windows",
             ]
         )
         context = browser.new_context(
@@ -117,14 +128,25 @@ def _finalize(video_webm: Path, music: Path | None, out_mp4: Path) -> None:
     """Convert WebM → MP4 at exact DURATION_S, muxing music if provided."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
 
+    # Quality-oriented encode for 1080x1920 portrait content:
+    #   - CRF 18 keeps text/edges crisp (22 was producing ~840 kbps which
+    #     softened type noticeably)
+    #   - -maxrate / -bufsize cap peak bitrate so Instagram's ingestion
+    #     doesn't re-transcode aggressively
+    #   - preset slow costs ~15s more render time but gives ~20% better
+    #     perceptual quality at the same bitrate
     common = [
         "-t", str(DURATION_S),
         "-c:v", "libx264",
-        "-preset", "medium",
-        "-crf", "22",
+        "-preset", "slow",
+        "-crf", "18",
+        "-maxrate", "10M",
+        "-bufsize", "16M",
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
         "-r", "30",
+        "-profile:v", "high",
+        "-level", "4.1",
     ]
 
     if music:
