@@ -66,19 +66,16 @@ def _record_video(html_path: Path, tmp_dir: Path) -> Path:
 
     tmp_dir.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
+        # Minimal flag set only — experimenting with GPU/ANGLE acceleration
+        # (swiftshader, gpu-rasterization) backfired on GitHub runners: it
+        # made Chromium 5–10x slower, which starved setInterval so scenes
+        # never advanced inside the 25s recording window. Plain software
+        # rendering is actually faster here.
         browser = p.chromium.launch(
             args=[
                 "--disable-dev-shm-usage",
                 "--no-sandbox",
                 "--disable-blink-features=AutomationControlled",
-                # Force GPU compositing + ANGLE for smoother CSS animations
-                # even without real hardware GPU on CI runners.
-                "--enable-gpu-rasterization",
-                "--enable-zero-copy",
-                "--ignore-gpu-blocklist",
-                "--use-gl=angle",
-                "--use-angle=swiftshader",
-                # Avoid throttling of animations when tab is "backgrounded".
                 "--disable-background-timer-throttling",
                 "--disable-renderer-backgrounding",
                 "--disable-backgrounding-occluded-windows",
