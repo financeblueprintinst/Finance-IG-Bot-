@@ -168,21 +168,92 @@ def _rng_for(today: date) -> random.Random:
     return random.Random(today.toordinal())
 
 
-def pick_content(today: date) -> ContentItem:
-    rng = _rng_for(today)
-    category = ROTATION[today.toordinal() % len(ROTATION)]
-    category_label, pool = CATEGORIES[category]
+# ---------------------------------------------------------------------------
+# Live-news seed (preferred over curated quotes/topics)
+# ---------------------------------------------------------------------------
+def _live_seed(today: date) -> dict | None:
+    """Pull a fresh finance story from RSS feeds via news_feed.
 
-    if category == "investor_quotes":
-        quote, author = rng.choice(pool)
-        source_text = quote
+    Returns a dict shaped like {source_text, author, category_label, _live_pick}
+    or None if no candidate is available — caller falls back to curated rotation.
+    """
+    try:
+        from news_feed import fetch_candidates
+    except Exception as e:
+        log.warning("news_feed import failed (%s) - using curated fallback", e)
+        return None
+    try:
+        candidates = fetch_candidates(today, limit=30)
+    except Exception as e:
+        log.warning("fetch_candidates raised (%s) - using curated fallback", e)
+        return None
+    if not candidates:
+        log.info("No live candidates available - using curated fallback")
+        return None
+
+    # Reel uses an *offset* pick so it doesn't grab the same story the Carousel
+    # would on the same day if both pipelines somehow ran together. Carousel
+    # uses [0]; Reel uses [1] when available, else [0].
+    pick = candidates[1] if len(candidates) > 1 else candidates[0]
+    log.info("Live reel seed: %s [%s]", pick.title, pick.source)
+
+    source_text = pick.title.strip()
+    if pick.summary:
+        source_text = f"{source_text}. {pick.summary.strip()}"
+
+    # Pick a fitting label from headline tone
+    t = pick.title.lower()
+    if any(w in t for w in ("crash", "plunge", "tumble", "rout", "wipe", "bankrupt")):
+        label = "MARKET CRASH"
+    elif any(w in t for w in ("soar", "surge", "skyrocket", "rally", "record", "all-time high")):
+        label = "MARKET RALLY"
+    elif any(w in t for w in ("ipo", "merger", "acquir", "buyback", "split")):
+        label = "BREAKING"
+    elif any(w in t for w in ("ceo", "founder", "billionaire")):
+        label = "PROFILE"
     else:
-        source_text = rng.choice(pool)
-        author = None
+        label = "BREAKING"
+
+    return {
+        "source_text": source_text,
+        "author": None,
+        "category_label": label,
+        "category": f"live_{pick.source}",
+        "_live_pick": pick,
+    }
+
+
+def pick_content(today: date) -> ContentItem:
+    """Live-first: try RSS news, fall back to curated quote/topic rotation."""
+    live = _live_seed(today)
+
+    if live is not None:
+        category = live["category"]
+        category_label = live["category_label"]
+        source_text = live["source_text"]
+        author = live["author"]
+    else:
+        rng = _rng_for(today)
+        category = ROTATION[today.toordinal() % len(ROTATION)]
+        category_label, pool = CATEGORIES[category]
+        if category == "investor_quotes":
+            quote, author_pick = rng.choice(pool)
+            source_text = quote
+            author = author_pick
+        else:
+            source_text = rng.choice(pool)
+            author = None
 
     log.info("Picked category=%s source=%r author=%s", category, source_text, author)
 
     structured = _generate_structured(source_text, author, category_label)
+
+    if live is not None and "_live_pick" in live:
+        try:
+            from news_feed import mark_used
+            mark_used(today, live["_live_pick"])
+        except Exception as e:
+            log.warning("mark_used failed (%s) - story may be reused tomorrow", e)
 
     return ContentItem(
         category=category,
@@ -195,6 +266,8 @@ def pick_content(today: date) -> ContentItem:
         takeaway_html=structured["takeaway_html"],
         image_keywords=structured["image_keywords"],
     )
+
+
 
 
 # ---------------------------------------------------------------------------
