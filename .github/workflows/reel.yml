@@ -60,7 +60,11 @@ jobs:
           git add -f output/reel_*.mp4 output/reel_*.json || true
           if ! git diff --cached --quiet; then
             git commit -m "chore(reel): $(date -u +%Y-%m-%d)"
-            git push
+            for i in 1 2 3; do
+              git pull --rebase --autostash origin "${GITHUB_REF_NAME:-main}" && git push && break || true
+              echo "Push attempt $i failed, retrying after sleep..."
+              sleep 5
+            done
           else
             echo "No new reel files to commit."
           fi
