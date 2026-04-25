@@ -2,6 +2,9 @@ name: Daily Instagram Post
 
 on:
   schedule:
+    # 18:55 UTC = 20:55 CEST in summer, 19:55 CET in winter.
+    # Instagram only needs the image public before publish, so the 20:00 target
+    # is close enough. Adjust as desired.
     - cron: "55 18 * * *"
   workflow_dispatch:
     inputs:
@@ -24,7 +27,7 @@ on:
         default: false
 
 permissions:
-  contents: write
+  contents: write  # needed to commit the generated PNG so raw.githubusercontent serves it
 
 jobs:
   publish:
@@ -46,7 +49,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           BRAND_NAME: ${{ vars.BRAND_NAME }}
           BRAND_HANDLE: ${{ vars.BRAND_HANDLE }}
-          DRY_RUN: "1"
+          DRY_RUN: "1"  # render-only pass
         run: |
           args=""
           if [ -n "${{ inputs.post_type }}" ]; then
@@ -58,10 +61,14 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f output/*.png || true
+          git add output/*.png || true
           if ! git diff --cached --quiet; then
             git commit -m "chore(post): daily image $(date -u +%Y-%m-%d)"
-            git push
+            for i in 1 2 3; do
+              git pull --rebase --autostash origin "${GITHUB_REF_NAME:-main}" && git push && break || true
+              echo "Push attempt $i failed, retrying after sleep..."
+              sleep 5
+            done
           else
             echo "No new image to commit."
           fi
