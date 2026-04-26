@@ -1,0 +1,28 @@
+{
+  "kind": "animated_reel",
+  "category": "live_yahoo_finance",
+  "category_label": "BREAKING",
+  "source_text": "The Southern Company (SO) Raises its Dividend by 2.7% to $0.76 per Share",
+  "author": null,
+  "hook_kicker": "BREAKING",
+  "hook_html": "The Southern Company (SO) Raises its",
+  "beats": [
+    {
+      "kicker": "THE PRINCIPLE",
+      "text_html": "The Southern Company (SO) Raises its Dividend by 2.7% to $0.76 per Share"
+    },
+    {
+      "kicker": "WHY IT MATTERS",
+      "text_html": "Applied consistently, this principle compounds into serious wealth over decades."
+    }
+  ],
+  "takeaway_html": "<em>Discipline</em> over hype. <em>Time</em> over timing.",
+  "image_keywords": "finance stock market charts wealth",
+  "image_urls": [
+    "https://images.pexels.com/photos/7567233/pexels-photo-7567233.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/7876507/pexels-photo-7876507.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/30268012/pexels-photo-30268012.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+  ],
+  "caption": "The Southern Company (SO) Raises its\n\nDiscipline over hype. Time over timing.\n\nFollow @financeblueprintdaily for daily mindset & market insights.\n\n#investing #wealthbuilding #financialfreedom #stockmarket #personalfinance #moneymindset #compound #valueinvesting #financialliteracy #warrenbuffett #stocks #wealth #passiveincome #moneytips #investmentstrategy\n\nNot financial advice. For informational purposes only.",
+  "duration": 25.0
+}
