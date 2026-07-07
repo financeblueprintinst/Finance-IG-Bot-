@@ -1,0 +1,28 @@
+{
+  "kind": "animated_reel",
+  "category": "live_yahoo_finance",
+  "category_label": "BREAKING",
+  "source_text": "Union Pacific, Norfolk Southern submit more merger data",
+  "author": null,
+  "hook_kicker": "BREAKING",
+  "hook_html": "Union Pacific, Norfolk Southern",
+  "beats": [
+    {
+      "kicker": "THE PRINCIPLE",
+      "text_html": "Union Pacific, Norfolk Southern submit more merger data"
+    },
+    {
+      "kicker": "WHY IT MATTERS",
+      "text_html": "Applied consistently, this principle compounds into serious wealth over decades."
+    }
+  ],
+  "takeaway_html": "<em>Discipline</em> over hype. <em>Time</em> over timing.",
+  "image_keywords": "finance stock market charts wealth",
+  "image_urls": [
+    "https://images.pexels.com/photos/6120177/pexels-photo-6120177.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/7567233/pexels-photo-7567233.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/11070637/pexels-photo-11070637.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+  ],
+  "caption": "Union Pacific, Norfolk Southern\n\nDiscipline over hype. Time over timing.\n\nFollow @financeblueprintdaily for daily mindset & market insights.\n\n#investing #wealthbuilding #financialfreedom #stockmarket #personalfinance #moneymindset #compound #valueinvesting #financialliteracy #warrenbuffett #stocks #wealth #passiveincome #moneytips #investmentstrategy\n\nNot financial advice. For informational purposes only.",
+  "duration": 25.0
+}
