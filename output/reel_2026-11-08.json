@@ -1,0 +1,28 @@
+{
+  "kind": "animated_reel",
+  "category": "live_marketwatch",
+  "category_label": "BREAKING",
+  "source_text": "Stocks are moving in sync again for the first time in a while. There’s just one problem.. An increasingly divided U.S. equity market is enjoying a rare moment of unity. Unfortunately, it has coincided with the biggest selloff in more than a year.",
+  "author": null,
+  "hook_kicker": "BREAKING",
+  "hook_html": "Stocks are moving in sync again for the first time in a while. There’s",
+  "beats": [
+    {
+      "kicker": "THE PRINCIPLE",
+      "text_html": "Stocks are moving in sync again for the first time in a while. There’s just one problem.. An increasingly divided U.S. e"
+    },
+    {
+      "kicker": "WHY IT MATTERS",
+      "text_html": "Applied consistently, this principle compounds into serious wealth over decades."
+    }
+  ],
+  "takeaway_html": "<em>Discipline</em> over hype. <em>Time</em> over timing.",
+  "image_keywords": "finance stock market charts wealth",
+  "image_urls": [
+    "https://images.pexels.com/photos/6120177/pexels-photo-6120177.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/7567233/pexels-photo-7567233.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "https://images.pexels.com/photos/11070637/pexels-photo-11070637.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+  ],
+  "caption": "Stocks are moving in sync again for the first time in a while. There’s\n\nDiscipline over hype. Time over timing.\n\nFollow @financeblueprintdaily for daily mindset & market insights.\n\n#investing #wealthbuilding #financialfreedom #stockmarket #personalfinance #moneymindset #compound #valueinvesting #financialliteracy #warrenbuffett #stocks #wealth #passiveincome #moneytips #investmentstrategy\n\nNot financial advice. For informational purposes only.",
+  "duration": 25.0
+}
